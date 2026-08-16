@@ -2,7 +2,7 @@
 // KONFIGURASI - GANTI DENGAN URL WEB APP GOOGLE APPS SCRIPT KAMU
 // =========================================================
 const CONFIG = {
-APP_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbxofnTuzqKGcw4fTQ26dMNzRT-VODpvU3czdMTD4MvE7RhB-ryjgI7KibwnOydknnEv/exec'
+APP_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbyrdi1XQrfUd9xFZYdMf0JtIHss0BbF4n0wj3KVh-Baoe0LhjvwmeEDmVjj5tX1pvQbGw/exec'
 };
 
 // ---------------------- AUTH (PIN admin) ----------------------
