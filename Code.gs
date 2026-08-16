@@ -39,12 +39,18 @@ function getSS() {
 function getOrCreateSheet(name, headers) {
   const ss = getSS();
   let sheet = ss.getSheetByName(name);
+  
   if (!sheet) {
     sheet = ss.insertSheet(name);
-    sheet.appendRow(headers);
-    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
-    sheet.setFrozenRows(1);
+    
+    // Pastikan headers ada dan tidak kosong sebelum membuat baris
+    if (headers && headers.length > 0) {
+      sheet.appendRow(headers);
+      sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+      sheet.setFrozenRows(1);
+    }
   }
+  
   return sheet;
 }
 
