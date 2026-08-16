@@ -90,6 +90,55 @@ Setelah selesai, kamu akan dapat URL seperti `https://absensi-rt.vercel.app`.
 - **Vercel untuk frontend**: hosting statis cepat & gratis, cocok untuk halaman scan QR yang perlu diakses banyak panitia dari HP masing-masing dengan koneksi HTTPS (wajib untuk akses kamera browser).
 - **Kenapa POST pakai `text/plain`?** Google Apps Script tidak menangani *preflight request* (`OPTIONS`) yang otomatis dikirim browser saat `Content-Type: application/json`. Dengan mengirim sebagai `text/plain`, browser menganggapnya "simple request" sehingga tidak ada preflight, dan datanya tetap di-parse sebagai JSON di sisi server.
 
+## Troubleshooting
+
+### Sheet `Warga`/`Kegiatan`/`Absensi` tidak muncul otomatis
+
+Sheet dibuat **otomatis saat pertama kali ada aksi berhasil** (misal buka tab Kegiatan setelah login). Kalau setelah dicoba tetap tidak muncul:
+
+1. **Uji langsung di editor Apps Script** (tanpa lewat web app dulu):
+   - Buka project Apps Script kamu.
+   - Di dropdown pilih fungsi **`setupSheets`**, lalu klik **Run ▶️**.
+   - Kalau berhasil, cek spreadsheet kamu — 3 sheet baru harus langsung muncul.
+   - Kalau muncul error, baca pesannya di **Execution log** (menu View > Logs).
+
+2. **Penyebab paling sering**: script dibuat sebagai project **berdiri sendiri** (New Project langsung dari [script.google.com](https://script.google.com)), bukan lewat **Extensions > Apps Script** *di dalam* Google Sheets yang ingin dipakai sebagai database. Akibatnya `SpreadsheetApp.getActiveSpreadsheet()` tidak tahu spreadsheet mana yang dimaksud.
+   - **Solusi termudah**: hapus project itu, lalu buka Google Sheets kamu, pilih **Extensions > Apps Script** dari dalam Sheet tsb, baru tempel ulang kode.
+   - **Solusi alternatif** (kalau ingin tetap pakai project berdiri sendiri): buka spreadsheet target, salin ID-nya dari URL (`.../d/`**`ID_INI`**`/edit`), lalu di Apps Script buka **Project Settings > Script Properties**, tambahkan key `SPREADSHEET_ID` dengan value ID tsb.
+
+3. **Setelah menjalankan `setupSheets` manual**, kamu tetap perlu **Deploy ulang** (Deploy > Manage deployments > Edit ✏️ > New version) supaya Web App memakai kode terbaru, lalu coba lagi dari aplikasi web.
+
+### Stuck di layar login walau PIN sudah benar (Script Properties sudah diset)
+
+Ini bug arsitektur Apps Script, sudah diperbaiki di versi kode ini — tapi kalau kamu masih pakai kode versi lama, ini penyebabnya:
+
+URL Web App Apps Script (`.../exec`) selalu me-**redirect (302)** ke `script.googleusercontent.com`. Sesuai spesifikasi `fetch()` browser, kalau request awalnya **POST**, redirect 302 membuat browser **mengubah method jadi GET dan membuang body**-nya. Karena PIN & action dulunya dikirim lewat body POST, data itu hilang sebelum sampai ke server — jadi PIN selalu dianggap salah walau kamu ketik dengan benar.
+
+**Solusinya (sudah diterapkan)**: semua request — baik baca (list kegiatan/warga) maupun tulis (tambah warga, tambah kegiatan, absen, login) — sekarang memakai **GET** dengan data di query string. GET tidak kena masalah downgrade method saat redirect, jadi jauh lebih andal.
+
+Kalau kamu meng-copy ulang `Code.gs` dan `app.js` versi terbaru ini:
+1. Tempel ulang `Code.gs` ke editor Apps Script.
+2. **Deploy > Manage deployments > Edit ✏️ > New version** (wajib, atau perubahan tidak aktif).
+3. Ganti `app.js` di project Vercel kamu, lalu redeploy.
+4. Coba login lagi.
+
+### Apakah `index.html` perlu dimasukkan ke Apps Script?
+
+**Tidak.** Apps Script hanya berperan sebagai backend/API — cukup berisi `Code.gs`, tidak ada file HTML sama sekali di sana. `index.html` dan `app.js` murni untuk **Vercel** (frontend). Alurnya:
+
+```
+Browser  →  index.html + app.js (hosting di Vercel)
+              │  fetch() ke URL Apps Script
+              ▼
+         Code.gs (Web App Apps Script)  →  Google Sheets (database)
+```
+
+Dua project ini sepenuhnya terpisah — satu-satunya "penghubung" adalah URL Web App Apps Script yang kamu tempel ke `CONFIG.APP_SCRIPT_URL` di `app.js`.
+
+### Muncul error "PIN salah atau sesi tidak valid"
+- Pastikan `ADMIN_PIN` di Script Properties sama persis dengan PIN yang kamu ketik di layar login.
+- Kalau baru saja mengganti `ADMIN_PIN`, PIN lama yang tersimpan di browser (localStorage) jadi tidak valid — klik **Keluar** lalu login ulang dengan PIN baru.
+
 ## Pengembangan lanjutan (opsional)
 - Tambah foto warga saat daftar (disimpan ke Google Drive via Apps Script).
 - PIN berbeda per peran (mis. PIN admin vs PIN panitia scan-only) dengan menambah level akses di `checkPin`.
