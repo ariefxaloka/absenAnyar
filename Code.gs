@@ -9,22 +9,27 @@
  *  - Absensi  : ID | ID_Kegiatan | ID_Warga | Nama | Waktu | Status
  *
  * CARA DEPLOY:
- *  1. Buat Google Spreadsheet baru (kosong juga tidak apa-apa).
- *  2. Extensions > Apps Script, hapus isi default, tempel SELURUH isi file ini.
- *  3. Klik Deploy > New deployment.
- *       - Select type: Web app
- *       - Execute as     : Me (akun kamu)
+ *  1. Buka Google Sheets yang ingin dipakai sebagai database (boleh kosong).
+ *  2. Extensions > Apps Script (WAJIB dari dalam Sheet ini, bukan project
+ *     berdiri sendiri dari script.google.com langsung).
+ *  3. Hapus isi default, tempel SELURUH isi file ini.
+ *  4. Deploy > New deployment > Type: Web app.
+ *       - Execute as     : Me
  *       - Who has access : Anyone
- *  4. Klik Deploy, izinkan akses (authorize). Salin "Web app URL".
- *  5. Tempel URL tsb ke CONFIG.APP_SCRIPT_URL di file webapp/app.js.
+ *  5. Deploy, authorize akses. Salin "Web app URL", tempel ke
+ *     CONFIG.APP_SCRIPT_URL di webapp/app.js.
+ *  6. Setiap kali kode ini diubah, WAJIB Deploy > Manage deployments >
+ *     Edit (pensil) > New version, supaya URL yang sama pakai kode terbaru.
  *
- * CATATAN PENTING SOAL CORS:
- *  Apps Script tidak mendukung preflight (OPTIONS request). Karena itu,
- *  di frontend semua request POST WAJIB dikirim dengan header
- *  Content-Type: 'text/plain;charset=utf-8' (BUKAN application/json),
- *  supaya browser menganggapnya "simple request" dan tidak melakukan
- *  preflight. Isi body tetap string JSON, nanti di-parse manual di sini
- *  lewat e.postData.contents. Ini sudah diimplementasikan di app.js.
+ * CATATAN PENTING SOAL METODE HTTP:
+ *  Semua aksi (baca & tulis) di sini SENGAJA diakses lewat GET (query
+ *  string), BUKAN POST. Alasannya: Apps Script Web App selalu me-redirect
+ *  (302) ke script.googleusercontent.com, dan sesuai spesifikasi fetch()
+ *  browser, body pada request POST HILANG saat redirect 302 diikuti
+ *  (method otomatis berubah jadi GET tanpa body). Ini bikin data seperti
+ *  PIN/action tidak pernah sampai ke server. GET tidak kena masalah ini,
+ *  jadi jauh lebih andal untuk arsitektur Apps Script + fetch().
+ *  doPost tetap disediakan sebagai fallback, tapi frontend resmi memakai GET.
  * =========================================================
  */
 
@@ -32,11 +37,10 @@ const SHEET_WARGA = 'Warga';
 const SHEET_KEGIATAN = 'Kegiatan';
 const SHEET_ABSENSI = 'Absensi';
 
-// getSS() akan mencoba spreadsheet yang menjadi "container" script ini
-// (kasus normal: dibuat lewat Extensions > Apps Script di dalam Sheet).
-// Jika script dibuat sebagai project berdiri sendiri (dari script.google.com
-// langsung, tidak lewat Sheet), getActiveSpreadsheet() akan null -> fallback
-// ke ID yang disimpan di Script Properties (key: SPREADSHEET_ID).
+// getSS() mencoba spreadsheet "container" script ini (kasus normal: dibuat
+// lewat Extensions > Apps Script di dalam Sheet). Jika script dibuat sebagai
+// project berdiri sendiri, getActiveSpreadsheet() null -> fallback ke ID
+// yang disimpan di Script Properties (key: SPREADSHEET_ID).
 function getSS() {
   const active = SpreadsheetApp.getActiveSpreadsheet();
   if (active) return active;
@@ -50,17 +54,6 @@ function getSS() {
     'script.google.com langsung). Atau, isi Script Properties "SPREADSHEET_ID" ' +
     'dengan ID spreadsheet tujuan.'
   );
-}
-
-// Jalankan fungsi ini SEKALI secara manual di editor (pilih setupSheets lalu klik Run ▶️)
-// untuk memastikan 3 sheet (Warga, Kegiatan, Absensi) berhasil dibuat, tanpa
-// perlu lewat Web App / PIN. Kalau ini gagal, cek pesan error di execution log —
-// biasanya soal binding spreadsheet seperti dijelaskan di getSS() di atas.
-function setupSheets() {
-  sheetWarga();
-  sheetKegiatan();
-  sheetAbsensi();
-  Logger.log('Sheet Warga, Kegiatan, Absensi berhasil dibuat/dipastikan ada.');
 }
 
 function getOrCreateSheet(name, headers) {
@@ -83,6 +76,15 @@ function sheetKegiatan() {
 }
 function sheetAbsensi() {
   return getOrCreateSheet(SHEET_ABSENSI, ['ID', 'ID_Kegiatan', 'ID_Warga', 'Nama', 'Waktu', 'Status']);
+}
+
+// Jalankan fungsi ini SEKALI secara manual di editor (pilih setupSheets lalu
+// klik Run ▶️) untuk memastikan 3 sheet berhasil dibuat, tanpa lewat Web App.
+function setupSheets() {
+  sheetWarga();
+  sheetKegiatan();
+  sheetAbsensi();
+  Logger.log('Sheet Warga, Kegiatan, Absensi berhasil dibuat/dipastikan ada.');
 }
 
 function sheetToObjects(sheet) {
@@ -124,14 +126,11 @@ function checkPin(pin) {
 // ---------------------- NOTIFIKASI WHATSAPP (opsional) ----------------------
 // Pakai gateway Fonnte (fonnte.com). Jika WA_TOKEN / WA_TARGET belum diatur
 // di Script Properties, fitur ini otomatis dilewati (tidak error).
-// Script Properties yang dipakai:
-//   WA_TOKEN  -> token API dari dashboard Fonnte
-//   WA_TARGET -> nomor WA admin/grup tujuan notifikasi (format 62xxxxxxxxxx atau ID grup)
 function sendWhatsAppNotif(pesan) {
   const props = PropertiesService.getScriptProperties();
   const token = props.getProperty('WA_TOKEN');
   const target = props.getProperty('WA_TARGET');
-  if (!token || !target) return; // belum dikonfigurasi, lewati diam-diam
+  if (!token || !target) return;
   try {
     UrlFetchApp.fetch('https://api.fonnte.com/send', {
       method: 'post',
@@ -144,13 +143,38 @@ function sendWhatsAppNotif(pesan) {
   }
 }
 
-// ---------------------- GET (baca data) ----------------------
+// ---------------------- ROUTER ----------------------
+// Semua request (GET maupun POST) diproses fungsi yang sama, "params" berisi
+// gabungan query string (dan body JSON jika ada, untuk kompatibilitas).
 function doGet(e) {
+  return handleRequest(e.parameter);
+}
+
+function doPost(e) {
+  const params = {};
+  Object.keys(e.parameter || {}).forEach(function (k) { params[k] = e.parameter[k]; });
+  if (e.postData && e.postData.contents) {
+    try {
+      const body = JSON.parse(e.postData.contents);
+      Object.keys(body).forEach(function (k) { params[k] = body[k]; });
+    } catch (err) { /* bukan JSON, abaikan */ }
+  }
+  return handleRequest(params);
+}
+
+function handleRequest(params) {
   try {
-    const action = e.parameter.action;
+    const action = params.action;
 
     if (action === 'ping') return json({ ok: true, data: 'pong' });
-    if (!checkPin(e.parameter.pin)) {
+
+    if (action === 'login') {
+      if (!checkPin(params.pin)) throw new Error('PIN salah');
+      return json({ ok: true, data: { login: true } });
+    }
+
+    // Semua action di bawah ini wajib PIN valid
+    if (!checkPin(params.pin)) {
       return json({ ok: false, error: 'PIN salah atau sesi tidak valid' });
     }
 
@@ -166,7 +190,7 @@ function doGet(e) {
         break;
 
       case 'getAbsensi': {
-        const idKegiatan = e.parameter.id_kegiatan;
+        const idKegiatan = params.id_kegiatan;
         let data = sheetToObjects(sheetAbsensi());
         if (idKegiatan) {
           data = data.filter(function (r) { return r.ID_Kegiatan === idKegiatan; });
@@ -176,48 +200,22 @@ function doGet(e) {
       }
 
       case 'getWargaById': {
-        const id = e.parameter.id;
+        const id = params.id;
         const data = sheetToObjects(sheetWarga());
         result = data.find(function (w) { return w.ID === id; }) || null;
         break;
       }
 
-      default:
-        return json({ ok: false, error: 'Action tidak dikenali: ' + action });
-    }
-
-    return json({ ok: true, data: result });
-  } catch (err) {
-    return json({ ok: false, error: err.message });
-  }
-}
-
-// ---------------------- POST (tulis data) ----------------------
-function doPost(e) {
-  try {
-    const body = JSON.parse(e.postData.contents);
-    const action = body.action;
-    let result;
-
-    if (action === 'login') {
-      if (!checkPin(body.pin)) throw new Error('PIN salah');
-      return json({ ok: true, data: { login: true } });
-    }
-
-    // Semua aksi di bawah ini mengubah data -> wajib PIN valid
-    if (!checkPin(body.pin)) throw new Error('PIN salah atau sesi tidak valid');
-
-    switch (action) {
       case 'addWarga': {
         const sheet = sheetWarga();
         const id = generateId('WRG');
         sheet.appendRow([
           id,
-          body.nama || '',
-          body.rt || '',
-          body.rw || '',
-          body.nohp || '',
-          body.alamat || '',
+          params.nama || '',
+          params.rt || '',
+          params.rw || '',
+          params.nohp || '',
+          params.alamat || '',
           Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')
         ]);
         result = { id: id };
@@ -227,14 +225,14 @@ function doPost(e) {
       case 'addKegiatan': {
         const sheet = sheetKegiatan();
         const id = generateId('KEG');
-        sheet.appendRow([id, body.nama || '', body.tanggal || '', body.lokasi || '', 'Aktif']);
+        sheet.appendRow([id, params.nama || '', params.tanggal || '', params.lokasi || '', 'Aktif']);
         result = { id: id };
         break;
       }
 
       case 'absen': {
-        const idKegiatan = body.id_kegiatan;
-        const idWarga = body.id_warga;
+        const idKegiatan = params.id_kegiatan;
+        const idWarga = params.id_warga;
         if (!idKegiatan || !idWarga) throw new Error('id_kegiatan dan id_warga wajib diisi');
 
         const warga = sheetToObjects(sheetWarga()).find(function (w) { return w.ID === idWarga; });
