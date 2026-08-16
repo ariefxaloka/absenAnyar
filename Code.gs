@@ -32,25 +32,46 @@ const SHEET_WARGA = 'Warga';
 const SHEET_KEGIATAN = 'Kegiatan';
 const SHEET_ABSENSI = 'Absensi';
 
+// getSS() akan mencoba spreadsheet yang menjadi "container" script ini
+// (kasus normal: dibuat lewat Extensions > Apps Script di dalam Sheet).
+// Jika script dibuat sebagai project berdiri sendiri (dari script.google.com
+// langsung, tidak lewat Sheet), getActiveSpreadsheet() akan null -> fallback
+// ke ID yang disimpan di Script Properties (key: SPREADSHEET_ID).
 function getSS() {
-  return SpreadsheetApp.getActiveSpreadsheet();
+  const active = SpreadsheetApp.getActiveSpreadsheet();
+  if (active) return active;
+
+  const id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  if (id) return SpreadsheetApp.openById(id);
+
+  throw new Error(
+    'Tidak menemukan Spreadsheet aktif. Pastikan script ini dibuat lewat menu ' +
+    'Extensions > Apps Script DI DALAM Google Sheets (bukan project baru dari ' +
+    'script.google.com langsung). Atau, isi Script Properties "SPREADSHEET_ID" ' +
+    'dengan ID spreadsheet tujuan.'
+  );
+}
+
+// Jalankan fungsi ini SEKALI secara manual di editor (pilih setupSheets lalu klik Run ▶️)
+// untuk memastikan 3 sheet (Warga, Kegiatan, Absensi) berhasil dibuat, tanpa
+// perlu lewat Web App / PIN. Kalau ini gagal, cek pesan error di execution log —
+// biasanya soal binding spreadsheet seperti dijelaskan di getSS() di atas.
+function setupSheets() {
+  sheetWarga();
+  sheetKegiatan();
+  sheetAbsensi();
+  Logger.log('Sheet Warga, Kegiatan, Absensi berhasil dibuat/dipastikan ada.');
 }
 
 function getOrCreateSheet(name, headers) {
   const ss = getSS();
   let sheet = ss.getSheetByName(name);
-  
   if (!sheet) {
     sheet = ss.insertSheet(name);
-    
-    // Pastikan headers ada dan tidak kosong sebelum membuat baris
-    if (headers && headers.length > 0) {
-      sheet.appendRow(headers);
-      sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
-      sheet.setFrozenRows(1);
-    }
+    sheet.appendRow(headers);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+    sheet.setFrozenRows(1);
   }
-  
   return sheet;
 }
 
