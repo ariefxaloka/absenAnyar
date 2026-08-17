@@ -8,7 +8,15 @@
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <style>
-  .tab-active { background-color: #4f46e5; color: white; }
+  #tab-kegiatan, #tab-warga, #tab-scan, #tab-laporan {
+    background-color: #ffffff; color: #475569; border: 1px solid #e2e8f0;
+  }
+  .tab-active {
+    background-color: #4338ca !important;
+    color: #ffffff !important;
+    border-color: #4338ca !important;
+    font-weight: 600;
+  }
   .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px);
     padding: 10px 18px; border-radius: 10px; font-size: 14px; opacity: 0; pointer-events: none;
     transition: all .25s ease; z-index: 50; box-shadow: 0 6px 18px rgba(0,0,0,.15); }
@@ -38,7 +46,7 @@
   <div id="app-root" class="hidden">
 
   <header class="bg-indigo-600 text-white py-5 px-4 shadow">
-    <div class="max-w-3xl mx-auto flex items-center justify-between">
+    <div class="max-w-4xl mx-auto flex items-center justify-between">
       <div>
         <h1 class="text-xl font-bold">📋 Absensi RT — QR Code</h1>
         <p class="text-indigo-100 text-sm">Kelola kegiatan, warga, dan absensi kehadiran</p>
@@ -47,14 +55,14 @@
     </div>
   </header>
 
-  <nav class="max-w-3xl mx-auto flex gap-2 px-4 mt-4 overflow-x-auto">
-    <button id="tab-kegiatan" class="tab-active px-4 py-2 rounded-full text-sm font-medium bg-white border border-slate-200 whitespace-nowrap">Kegiatan</button>
-    <button id="tab-warga" class="px-4 py-2 rounded-full text-sm font-medium bg-white border border-slate-200 whitespace-nowrap">Warga & QR</button>
-    <button id="tab-scan" class="px-4 py-2 rounded-full text-sm font-medium bg-white border border-slate-200 whitespace-nowrap">Scan Absensi</button>
-    <button id="tab-laporan" class="px-4 py-2 rounded-full text-sm font-medium bg-white border border-slate-200 whitespace-nowrap">Laporan</button>
+  <nav class="max-w-4xl mx-auto flex gap-2 px-4 mt-4 overflow-x-auto">
+    <button id="tab-kegiatan" class="tab-active px-4 py-2 rounded-full text-sm whitespace-nowrap">Kegiatan</button>
+    <button id="tab-warga" class="px-4 py-2 rounded-full text-sm whitespace-nowrap">Warga & QR</button>
+    <button id="tab-scan" class="px-4 py-2 rounded-full text-sm whitespace-nowrap">Scan Absensi</button>
+    <button id="tab-laporan" class="px-4 py-2 rounded-full text-sm whitespace-nowrap">Laporan</button>
   </nav>
 
-  <main class="max-w-3xl mx-auto p-4 space-y-4">
+  <main class="max-w-4xl mx-auto p-4 space-y-4">
 
     <!-- PANEL: KEGIATAN -->
     <section id="panel-kegiatan" class="space-y-4">
@@ -81,23 +89,51 @@
     <!-- PANEL: WARGA -->
     <section id="panel-warga" class="hidden space-y-4">
       <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
-        <h2 class="font-semibold mb-3">Daftarkan Warga</h2>
+        <h2 id="warga-form-title" class="font-semibold mb-3">Daftarkan Warga</h2>
         <form id="form-warga" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <input name="nama" required placeholder="Nama lengkap" class="border rounded-lg px-3 py-2 text-sm sm:col-span-2" />
-          <input name="rt" placeholder="RT" class="border rounded-lg px-3 py-2 text-sm" />
-          <input name="rw" placeholder="RW" class="border rounded-lg px-3 py-2 text-sm" />
+
+          <select name="namaRumah" id="warga-namaRumah" required class="border rounded-lg px-3 py-2 text-sm">
+            <option value="">-- Nama Rumah --</option>
+            <option value="JOLIN">JOLIN</option>
+            <option value="PIRES">PIRES</option>
+          </select>
+          <select name="blokRumah" id="warga-blokRumah" required class="border rounded-lg px-3 py-2 text-sm"></select>
+
+          <input name="noRumah" placeholder="No. Rumah" class="border rounded-lg px-3 py-2 text-sm" />
           <input name="nohp" placeholder="No. HP" class="border rounded-lg px-3 py-2 text-sm" />
-          <input name="alamat" placeholder="Alamat" class="border rounded-lg px-3 py-2 text-sm" />
-          <button class="sm:col-span-2 bg-indigo-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-indigo-700">Simpan Warga</button>
+
+          <div class="sm:col-span-2 flex gap-2">
+            <button id="warga-submit-btn" class="flex-1 bg-indigo-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-indigo-700">Simpan Warga</button>
+            <button type="button" id="warga-cancel-edit" class="hidden bg-slate-200 rounded-lg px-4 text-sm font-medium hover:bg-slate-300">Batal Edit</button>
+          </div>
         </form>
       </div>
 
       <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
-        <input id="warga-search" placeholder="Cari nama warga..." class="border rounded-lg px-3 py-2 text-sm w-full mb-3" />
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+          <input id="warga-search" placeholder="Cari nama warga..." class="border rounded-lg px-3 py-2 text-sm" />
+          <select id="filter-namaRumah" class="border rounded-lg px-3 py-2 text-sm">
+            <option value="">Semua Nama Rumah</option>
+            <option value="JOLIN">JOLIN</option>
+            <option value="PIRES">PIRES</option>
+          </select>
+          <select id="filter-blok" class="border rounded-lg px-3 py-2 text-sm"></select>
+        </div>
+
+        <button id="warga-bulk-delete" class="hidden mb-3 bg-red-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-red-700">Hapus Terpilih</button>
+
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead class="bg-slate-50 text-left text-slate-500">
-              <tr><th class="p-3">Nama</th><th class="p-3">RT/RW</th><th class="p-3">No. HP</th><th class="p-3">QR</th></tr>
+              <tr>
+                <th class="p-3 w-8"><input type="checkbox" id="warga-select-all" /></th>
+                <th class="p-3">No</th>
+                <th class="p-3">Nama</th>
+                <th class="p-3">Rumah</th>
+                <th class="p-3">No. HP</th>
+                <th class="p-3">Aksi</th>
+              </tr>
             </thead>
             <tbody id="warga-tbody"></tbody>
           </table>
@@ -111,24 +147,48 @@
         <h2 class="font-semibold">Scan Absensi</h2>
         <select id="scan-kegiatan" class="border rounded-lg px-3 py-2 text-sm w-full"></select>
 
+        <div id="scan-summary" class="hidden grid grid-cols-3 gap-2 text-center">
+          <div class="bg-emerald-50 rounded-lg py-2">
+            <div id="scan-hadir-count" class="text-lg font-bold text-emerald-700">0</div>
+            <div class="text-xs text-emerald-700">Hadir</div>
+          </div>
+          <div class="bg-sky-50 rounded-lg py-2">
+            <div id="scan-ijin-count" class="text-lg font-bold text-sky-700">0</div>
+            <div class="text-xs text-sky-700">Ijin</div>
+          </div>
+          <div class="bg-red-50 rounded-lg py-2">
+            <div id="scan-tidakhadir-count" class="text-lg font-bold text-red-700">0</div>
+            <div class="text-xs text-red-700">Tidak Hadir</div>
+          </div>
+        </div>
+
         <div id="qr-reader" class="rounded-lg overflow-hidden"></div>
 
         <div class="flex gap-2">
-          <button id="scan-start" class="flex-1 bg-indigo-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-indigo-700">Mulai Kamera</button>
+          <button id="scan-start" class="flex-1 bg-indigo-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-indigo-700">Mulai Kamera (Hadir)</button>
           <button id="scan-stop" class="hidden flex-1 bg-slate-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-slate-700">Hentikan Kamera</button>
         </div>
 
         <details class="text-sm">
-          <summary class="cursor-pointer text-slate-500">Input manual (tanpa kamera)</summary>
-          <form id="scan-manual-form" class="flex gap-2 mt-2">
-            <input id="scan-manual-input" placeholder="Ketik/scan ID warga (mis. WRG-...)" class="border rounded-lg px-3 py-2 text-sm flex-1" />
-            <button class="bg-indigo-600 text-white rounded-lg px-4 text-sm font-medium hover:bg-indigo-700">Absen</button>
+          <summary class="cursor-pointer text-slate-500">Tandai manual (Hadir / Ijin tanpa scan)</summary>
+          <form id="scan-manual-form" class="flex flex-col sm:flex-row gap-2 mt-2">
+            <select id="scan-manual-select" class="border rounded-lg px-3 py-2 text-sm flex-1"></select>
+            <select id="scan-manual-status" class="border rounded-lg px-3 py-2 text-sm">
+              <option value="Hadir">Hadir</option>
+              <option value="Ijin">Ijin</option>
+            </select>
+            <button class="bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-indigo-700">Simpan</button>
           </form>
+        </details>
+
+        <details class="text-sm">
+          <summary class="cursor-pointer text-slate-500">Lihat daftar Tidak Hadir</summary>
+          <ul id="scan-tidakhadir-list" class="mt-2 space-y-1 text-slate-600 max-h-48 overflow-y-auto"></ul>
         </details>
       </div>
 
       <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
-        <h3 class="font-semibold mb-2 text-sm">Log Absen Terbaru</h3>
+        <h3 class="font-semibold mb-2 text-sm">Log Terbaru</h3>
         <ul id="scan-log" class="space-y-1 text-sm"></ul>
       </div>
     </section>
@@ -140,6 +200,22 @@
           <select id="laporan-kegiatan" class="border rounded-lg px-3 py-2 text-sm flex-1"></select>
           <button id="laporan-export" class="bg-emerald-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-emerald-700 whitespace-nowrap">Export CSV</button>
         </div>
+
+        <div id="laporan-summary" class="hidden grid grid-cols-3 gap-2 text-center">
+          <div class="bg-emerald-50 rounded-lg py-2">
+            <div id="laporan-hadir-count" class="text-lg font-bold text-emerald-700">0</div>
+            <div class="text-xs text-emerald-700">Hadir</div>
+          </div>
+          <div class="bg-sky-50 rounded-lg py-2">
+            <div id="laporan-ijin-count" class="text-lg font-bold text-sky-700">0</div>
+            <div class="text-xs text-sky-700">Ijin</div>
+          </div>
+          <div class="bg-red-50 rounded-lg py-2">
+            <div id="laporan-tidakhadir-count" class="text-lg font-bold text-red-700">0</div>
+            <div class="text-xs text-red-700">Tidak Hadir</div>
+          </div>
+        </div>
+
         <p id="laporan-total" class="text-sm text-slate-500"></p>
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
