@@ -33,7 +33,43 @@ absensi-rt/
 
 > Catatan: setiap kali kamu **mengedit ulang** Code.gs, kamu harus **Deploy > Manage deployments > Edit (pensil) > New version** agar perubahan aktif di URL yang sama.
 
+## Struktur Data Warga (Terbaru)
+
+Setiap warga sekarang punya alamat terstruktur, bukan teks bebas:
+
+- **Nama Rumah** (dropdown): `JOLIN` atau `PIRES`
+- **Blok Rumah** (dropdown, tergantung Nama Rumah):
+  - JOLIN → hanya `F`, `G`
+  - PIRES → hanya `A`, `B`, `C`, `D`, `E`
+- **No. Rumah** (teks bebas)
+
+Validasi Blok Rumah vs Nama Rumah dicek di **backend** (bukan cuma di form), jadi data tidak bisa "nyasar" biarpun request dikirim manual.
+
+### Migrasi dari versi lama (kolom RT/RW/Alamat)
+
+Kalau spreadsheet kamu sudah pernah dipakai dengan skema lama:
+1. Tempel ulang `Code.gs` terbaru ke Apps Script, **Deploy > New version**.
+2. Di editor Apps Script, pilih fungsi **`migrateWargaSheet`** dari dropdown, klik **Run ▶️**.
+3. Ini mengganti nama kolom `RT`→`NamaRumah`, `RW`→`BlokRumah`, `Alamat`→`NoRumah` **tanpa menghapus data lama**.
+4. **Penting**: isi lama di kolom tsb (misal RT berisi angka "01") tidak otomatis berubah jadi `JOLIN`/`PIRES` — sesuaikan manual langsung di sheet untuk data lama.
+
+## Fitur Baru — Menu Warga & QR
+- Tabel warga sekarang menampilkan **nomor urut**, kolom **Rumah** (Nama Rumah + Blok + No. Rumah gabungan), dan aksi **Edit** / **Hapus** per baris.
+- **Hapus massal**: centang beberapa baris (atau centang semua lewat header), lalu klik **Hapus Terpilih**.
+- **Filter**: cari nama, atau filter berdasarkan Nama Rumah dan/atau Blok — kombinasi keduanya bisa dipakai sekaligus.
+
+## Fitur Baru — Menu Scan Absensi
+- Selain **Hadir** (lewat scan kamera), sekarang ada status **Ijin** — ditandai manual lewat form "Tandai manual" (pilih warga + pilih status Ijin/Hadir tanpa perlu scan).
+- **Tidak Hadir** dihitung otomatis: total warga di database dikurangi yang sudah tercatat Hadir/Ijin untuk kegiatan yang sedang dipilih. Ditampilkan sebagai kartu ringkasan (Hadir / Ijin / Tidak Hadir) yang update real-time setiap ada scan/tandai baru, plus daftar nama yang belum tercatat (bisa dibuka lewat "Lihat daftar Tidak Hadir").
+- Kalau warga yang sudah ditandai Ijin ternyata datang dan di-scan, statusnya otomatis diperbarui jadi Hadir.
+
+## Fitur Baru — Menu Laporan
+- Kolom **Nama** sekarang menampilkan alamat (Nama Rumah, Blok, No. Rumah) di bawah nama, dengan huruf lebih kecil & warna abu-abu supaya beda dari nama.
+- Kartu ringkasan Hadir / Ijin / Tidak Hadir juga muncul di sini, dan Export CSV kini menyertakan kolom Nama Rumah, Blok, dan No. Rumah.
+
 ## LANGKAH 1B — Atur PIN Admin & Notifikasi WhatsApp (opsional tapi disarankan)
+
+
 
 Di editor Apps Script, klik ikon **⚙️ Project Settings** di sidebar kiri, scroll ke **Script Properties**, klik **Add script property**, lalu tambahkan:
 
