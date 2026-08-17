@@ -2,8 +2,10 @@
 // KONFIGURASI - GANTI DENGAN URL WEB APP GOOGLE APPS SCRIPT KAMU
 // =========================================================
 const CONFIG = {
-  APP_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbwTePPYGA7sPIS_l4lsp_9-OmVlZaVnNNa73onZNJ80sbcTIJVhD8pYnz9wwZ6AgdZM_w/exec'
+  APP_SCRIPT_URL: 'PASTE_URL_WEB_APP_APPS_SCRIPT_DI_SINI'
 };
+
+const BLOK_OPTIONS = { JOLIN: ['F', 'G'], PIRES: ['A', 'B', 'C', 'D', 'E'] };
 
 // ---------------------- AUTH (PIN admin) ----------------------
 const AUTH_KEY = 'rt_absensi_pin';
@@ -12,12 +14,8 @@ function setPin(pin) { localStorage.setItem(AUTH_KEY, pin); }
 function clearPin() { localStorage.removeItem(AUTH_KEY); }
 
 // ---------------------- Helper fetch ----------------------
-// PENTING: semua request (baca & tulis) memakai GET dengan query string,
-// BUKAN POST. Alasan: URL Apps Script (.../exec) selalu redirect (302) ke
-// script.googleusercontent.com, dan sesuai spesifikasi fetch() browser,
-// redirect 302 pada request POST membuang body-nya (method berubah jadi GET
-// tanpa data). Akibatnya action & PIN tidak pernah sampai ke server kalau
-// dikirim lewat POST. GET tidak kena masalah ini.
+// Semua request (baca & tulis) memakai GET dengan query string, BUKAN POST,
+// karena redirect 302 Apps Script membuang body request POST di fetch().
 async function apiCall(action, params) {
   const url = new URL(CONFIG.APP_SCRIPT_URL);
   url.searchParams.set('action', action);
@@ -32,9 +30,17 @@ async function apiCall(action, params) {
   if (!json.ok) throw new Error(json.error || 'Terjadi kesalahan');
   return json.data;
 }
-// Alias supaya kode di bawah (yang memanggil apiGet/apiPost) tetap jalan tanpa diubah satu-satu.
 const apiGet = apiCall;
 const apiPost = apiCall;
+
+// ---------------------- Toast ----------------------
+function toast(msg, type = 'success') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + (type === 'error' ? 'toast-error' : 'toast-success');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.className = 'toast'; }, 3000);
+}
 
 // ---------------------- Login screen ----------------------
 document.getElementById('login-form').addEventListener('submit', async (e) => {
@@ -44,7 +50,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   errEl.classList.add('hidden');
   setPin(pinInput);
   try {
-    await apiPost('login', {});
+    await apiCall('login', {});
     document.getElementById('login-overlay').classList.add('hidden');
     document.getElementById('app-root').classList.remove('hidden');
     showTab('kegiatan');
@@ -65,22 +71,13 @@ document.getElementById('logout-btn').addEventListener('click', () => {
 async function tryAutoLogin() {
   if (!getPin()) return;
   try {
-    await apiPost('login', {});
+    await apiCall('login', {});
     document.getElementById('login-overlay').classList.add('hidden');
     document.getElementById('app-root').classList.remove('hidden');
     showTab('kegiatan');
   } catch (err) {
     clearPin();
   }
-}
-
-// ---------------------- Toast ----------------------
-function toast(msg, type = 'success') {
-  const el = document.getElementById('toast');
-  el.textContent = msg;
-  el.className = 'toast show ' + (type === 'error' ? 'toast-error' : 'toast-success');
-  clearTimeout(el._t);
-  el._t = setTimeout(() => { el.className = 'toast'; }, 3000);
 }
 
 // ---------------------- Tab navigation ----------------------
@@ -91,11 +88,19 @@ function showTab(name) {
     document.getElementById('tab-' + t).classList.toggle('tab-active', t === name);
   });
   if (name === 'kegiatan') loadKegiatanList();
-  if (name === 'warga') loadWargaList();
-  if (name === 'scan') { loadKegiatanDropdown('scan-kegiatan'); }
+  if (name === 'warga') { loadWargaList(); }
+  if (name === 'scan') { loadKegiatanDropdown('scan-kegiatan'); resetScanSummary(); }
   if (name === 'laporan') { loadKegiatanDropdown('laporan-kegiatan'); }
 }
 tabs.forEach(t => document.getElementById('tab-' + t).addEventListener('click', () => showTab(t)));
+
+// ---------------------- Blok Rumah dependent dropdown ----------------------
+function populateBlokSelect(selectEl, namaRumah, selectedValue, includeAllOption) {
+  const options = namaRumah && BLOK_OPTIONS[namaRumah] ? BLOK_OPTIONS[namaRumah] : ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+  let html = includeAllOption ? '<option value="">Semua Blok</option>' : '<option value="">-- Pilih Blok --</option>';
+  html += options.map(o => `<option value="${o}" ${o === selectedValue ? 'selected' : ''}>${o}</option>`).join('');
+  selectEl.innerHTML = html;
+}
 
 // ---------------------- KEGIATAN ----------------------
 async function loadKegiatanList() {
@@ -154,60 +159,174 @@ async function loadKegiatanDropdown(selectId) {
 
 // ---------------------- WARGA ----------------------
 let wargaCache = [];
+let wargaEditId = null; // null = mode tambah, terisi = mode edit
+let wargaSelected = new Set(); // ID yang dicentang untuk hapus massal
+
+const formWargaNamaRumah = document.getElementById('warga-namaRumah');
+const formWargaBlokRumah = document.getElementById('warga-blokRumah');
+formWargaNamaRumah.addEventListener('change', () => {
+  populateBlokSelect(formWargaBlokRumah, formWargaNamaRumah.value, '', false);
+});
+populateBlokSelect(formWargaBlokRumah, '', '', false);
+
+const filterNamaRumah = document.getElementById('filter-namaRumah');
+const filterBlok = document.getElementById('filter-blok');
+filterNamaRumah.addEventListener('change', () => {
+  populateBlokSelect(filterBlok, filterNamaRumah.value, '', true);
+  applyWargaFilter();
+});
+populateBlokSelect(filterBlok, '', '', true);
+filterBlok.addEventListener('change', applyWargaFilter);
+document.getElementById('warga-search').addEventListener('input', applyWargaFilter);
 
 async function loadWargaList() {
   const tbody = document.getElementById('warga-tbody');
-  tbody.innerHTML = '<tr><td class="p-3 text-slate-400" colspan="4">Memuat...</td></tr>';
+  tbody.innerHTML = '<tr><td class="p-3 text-slate-400" colspan="6">Memuat...</td></tr>';
   try {
     wargaCache = await apiGet('getWarga');
-    renderWargaTable(wargaCache);
+    wargaSelected.clear();
+    updateBulkDeleteButton();
+    applyWargaFilter();
   } catch (err) {
-    tbody.innerHTML = `<tr><td class="p-3 text-red-500" colspan="4">Gagal memuat: ${escapeHtml(err.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td class="p-3 text-red-500" colspan="6">Gagal memuat: ${escapeHtml(err.message)}</td></tr>`;
   }
+}
+
+function applyWargaFilter() {
+  const q = document.getElementById('warga-search').value.toLowerCase();
+  const nr = filterNamaRumah.value;
+  const bl = filterBlok.value;
+  const filtered = wargaCache.filter(w => {
+    if (q && !(w.Nama || '').toLowerCase().includes(q)) return false;
+    if (nr && w.NamaRumah !== nr) return false;
+    if (bl && w.BlokRumah !== bl) return false;
+    return true;
+  });
+  renderWargaTable(filtered);
 }
 
 function renderWargaTable(data) {
   const tbody = document.getElementById('warga-tbody');
   if (!data.length) {
-    tbody.innerHTML = '<tr><td class="p-3 text-slate-400" colspan="4">Belum ada warga terdaftar.</td></tr>';
+    tbody.innerHTML = '<tr><td class="p-3 text-slate-400" colspan="6">Tidak ada data warga.</td></tr>';
     return;
   }
-  tbody.innerHTML = data.map(w => `
+  tbody.innerHTML = data.map((w, idx) => `
     <tr class="border-b border-slate-100">
+      <td class="p-3 w-8">
+        <input type="checkbox" class="warga-row-check" data-id="${w.ID}" ${wargaSelected.has(w.ID) ? 'checked' : ''} />
+      </td>
+      <td class="p-3 text-slate-400">${idx + 1}</td>
       <td class="p-3 font-medium">${escapeHtml(w.Nama)}</td>
-      <td class="p-3">RT ${escapeHtml(w.RT)} / RW ${escapeHtml(w.RW)}</td>
+      <td class="p-3">${escapeHtml(w.NamaRumah)} ${escapeHtml(w.BlokRumah)}${w.NoRumah ? ', No. ' + escapeHtml(w.NoRumah) : ''}</td>
       <td class="p-3">${escapeHtml(w.NoHP)}</td>
-      <td class="p-3">
-        <button class="text-indigo-600 hover:underline text-sm" onclick="openQrModal('${w.ID}','${escapeAttr(w.Nama)}')">Lihat QR</button>
+      <td class="p-3 space-x-2 whitespace-nowrap">
+        <button class="text-indigo-600 hover:underline text-sm" onclick="openQrModal('${w.ID}','${escapeAttr(w.Nama)}')">QR</button>
+        <button class="text-amber-600 hover:underline text-sm" onclick="editWarga('${w.ID}')">Edit</button>
+        <button class="text-red-600 hover:underline text-sm" onclick="deleteWarga('${w.ID}','${escapeAttr(w.Nama)}')">Hapus</button>
       </td>
     </tr>`).join('');
+
+  document.querySelectorAll('.warga-row-check').forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) wargaSelected.add(cb.dataset.id);
+      else wargaSelected.delete(cb.dataset.id);
+      updateBulkDeleteButton();
+    });
+  });
 }
 
-document.getElementById('warga-search').addEventListener('input', (e) => {
-  const q = e.target.value.toLowerCase();
-  renderWargaTable(wargaCache.filter(w => (w.Nama || '').toLowerCase().includes(q)));
+document.getElementById('warga-select-all').addEventListener('change', (e) => {
+  document.querySelectorAll('.warga-row-check').forEach(cb => {
+    cb.checked = e.target.checked;
+    if (e.target.checked) wargaSelected.add(cb.dataset.id);
+    else wargaSelected.delete(cb.dataset.id);
+  });
+  updateBulkDeleteButton();
 });
+
+function updateBulkDeleteButton() {
+  const btn = document.getElementById('warga-bulk-delete');
+  btn.classList.toggle('hidden', wargaSelected.size === 0);
+  btn.textContent = `Hapus Terpilih (${wargaSelected.size})`;
+}
+
+document.getElementById('warga-bulk-delete').addEventListener('click', async () => {
+  if (!wargaSelected.size) return;
+  if (!confirm(`Hapus ${wargaSelected.size} warga terpilih? Tindakan ini tidak bisa dibatalkan.`)) return;
+  try {
+    await apiPost('deleteWargaMultiple', { ids: Array.from(wargaSelected).join(',') });
+    toast('Warga terpilih berhasil dihapus');
+    loadWargaList();
+  } catch (err) {
+    toast('Gagal menghapus: ' + err.message, 'error');
+  }
+});
+
+function editWarga(id) {
+  const w = wargaCache.find(x => x.ID === id);
+  if (!w) return;
+  wargaEditId = id;
+  const f = document.getElementById('form-warga');
+  f.nama.value = w.Nama || '';
+  f.namaRumah.value = w.NamaRumah || '';
+  populateBlokSelect(formWargaBlokRumah, w.NamaRumah, w.BlokRumah, false);
+  f.noRumah.value = w.NoRumah || '';
+  f.nohp.value = w.NoHP || '';
+  document.getElementById('warga-form-title').textContent = 'Edit Warga: ' + w.Nama;
+  document.getElementById('warga-submit-btn').textContent = 'Update Warga';
+  document.getElementById('warga-cancel-edit').classList.remove('hidden');
+  f.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+document.getElementById('warga-cancel-edit').addEventListener('click', resetWargaForm);
+
+function resetWargaForm() {
+  wargaEditId = null;
+  document.getElementById('form-warga').reset();
+  populateBlokSelect(formWargaBlokRumah, '', '', false);
+  document.getElementById('warga-form-title').textContent = 'Daftarkan Warga';
+  document.getElementById('warga-submit-btn').textContent = 'Simpan Warga';
+  document.getElementById('warga-cancel-edit').classList.add('hidden');
+}
+
+async function deleteWarga(id, nama) {
+  if (!confirm(`Hapus data warga "${nama}"? Tindakan ini tidak bisa dibatalkan.`)) return;
+  try {
+    await apiPost('deleteWarga', { id });
+    toast('Warga berhasil dihapus');
+    loadWargaList();
+  } catch (err) {
+    toast('Gagal menghapus: ' + err.message, 'error');
+  }
+}
 
 document.getElementById('form-warga').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
+  const payload = {
+    nama: f.nama.value.trim(),
+    namaRumah: f.namaRumah.value,
+    blokRumah: f.blokRumah.value,
+    noRumah: f.noRumah.value.trim(),
+    nohp: f.nohp.value.trim()
+  };
   try {
-    await apiPost('addWarga', {
-      nama: f.nama.value.trim(),
-      rt: f.rt.value.trim(),
-      rw: f.rw.value.trim(),
-      nohp: f.nohp.value.trim(),
-      alamat: f.alamat.value.trim()
-    });
-    f.reset();
-    toast('Warga berhasil ditambahkan');
+    if (wargaEditId) {
+      await apiPost('updateWarga', Object.assign({ id: wargaEditId }, payload));
+      toast('Data warga berhasil diperbarui');
+    } else {
+      await apiPost('addWarga', payload);
+      toast('Warga berhasil ditambahkan');
+    }
+    resetWargaForm();
     loadWargaList();
   } catch (err) {
     toast('Gagal: ' + err.message, 'error');
   }
 });
 
-// ---------------------- QR Modal (generate + download + print) ----------------------
+// ---------------------- QR Modal (generate + download) ----------------------
 function openQrModal(id, nama) {
   document.getElementById('qr-modal').classList.remove('hidden');
   document.getElementById('qr-modal-nama').textContent = nama;
@@ -229,6 +348,44 @@ document.getElementById('qr-modal-close').addEventListener('click', () => {
 // ---------------------- SCAN ABSENSI ----------------------
 let html5QrCode = null;
 let scanBusy = false;
+let scanWargaCache = [];
+
+document.getElementById('scan-kegiatan').addEventListener('change', resetScanSummary);
+
+async function resetScanSummary() {
+  const idKegiatan = document.getElementById('scan-kegiatan').value;
+  const summaryEl = document.getElementById('scan-summary');
+  if (!idKegiatan) { summaryEl.classList.add('hidden'); return; }
+  summaryEl.classList.remove('hidden');
+  await refreshRekap(idKegiatan, 'scan');
+  if (!scanWargaCache.length) {
+    scanWargaCache = await apiGet('getWarga');
+    populateScanManualSelect();
+  }
+}
+
+function populateScanManualSelect() {
+  const select = document.getElementById('scan-manual-select');
+  select.innerHTML = '<option value="">-- Pilih warga --</option>' +
+    scanWargaCache.map(w => `<option value="${w.ID}">${escapeHtml(w.Nama)} (${escapeHtml(w.NamaRumah)} ${escapeHtml(w.BlokRumah)})</option>`).join('');
+}
+
+async function refreshRekap(idKegiatan, prefix) {
+  try {
+    const rekap = await apiGet('getRekapKehadiran', { id_kegiatan: idKegiatan });
+    document.getElementById(prefix + '-hadir-count').textContent = rekap.hadir;
+    document.getElementById(prefix + '-ijin-count').textContent = rekap.ijin;
+    document.getElementById(prefix + '-tidakhadir-count').textContent = rekap.tidakHadir;
+    const listEl = document.getElementById(prefix + '-tidakhadir-list');
+    if (listEl) {
+      listEl.innerHTML = rekap.tidakHadirList.length
+        ? rekap.tidakHadirList.map(w => `<li>${escapeHtml(w.Nama)} — ${escapeHtml(w.NamaRumah)} ${escapeHtml(w.BlokRumah)}</li>`).join('')
+        : '<li class="text-slate-400">Semua warga sudah tercatat.</li>';
+    }
+  } catch (err) {
+    // biarkan diam, angka lama tetap tampil
+  }
+}
 
 document.getElementById('scan-start').addEventListener('click', async () => {
   const idKegiatan = document.getElementById('scan-kegiatan').value;
@@ -245,10 +402,10 @@ document.getElementById('scan-start').addEventListener('click', async () => {
       async (decodedText) => {
         if (scanBusy) return;
         scanBusy = true;
-        await handleScanResult(idKegiatan, decodedText);
+        await handleScanResult(idKegiatan, decodedText, 'Hadir');
         setTimeout(() => { scanBusy = false; }, 1500);
       },
-      () => {} // ignore per-frame decode errors
+      () => {}
     );
   } catch (err) {
     toast('Tidak bisa mengakses kamera: ' + err.message, 'error');
@@ -266,66 +423,86 @@ function stopScan() {
   document.getElementById('scan-stop').classList.add('hidden');
 }
 
-async function handleScanResult(idKegiatan, idWarga) {
+async function handleScanResult(idKegiatan, idWarga, status) {
   try {
-    const result = await apiPost('absen', { id_kegiatan: idKegiatan, id_warga: idWarga });
+    const result = await apiPost('absen', { id_kegiatan: idKegiatan, id_warga: idWarga, status });
     if (result.duplikat) {
-      toast(`${result.nama} sudah absen (${result.waktu})`, 'error');
+      toast(`${result.nama} sudah tercatat ${result.status} (${result.waktu})`, 'error');
     } else {
-      toast(`Hadir: ${result.nama} — ${result.waktu}`);
+      toast(`${result.status}: ${result.nama} — ${result.waktu}`);
     }
-    addScanLog(result.nama, result.waktu, result.duplikat);
+    addScanLog(result.nama, result.waktu, result.status, result.duplikat);
+    refreshRekap(idKegiatan, 'scan');
   } catch (err) {
-    toast('Gagal absen: ' + err.message, 'error');
+    toast('Gagal mencatat: ' + err.message, 'error');
   }
 }
 
-function addScanLog(nama, waktu, duplikat) {
+function addScanLog(nama, waktu, status, duplikat) {
   const list = document.getElementById('scan-log');
   const li = document.createElement('li');
-  li.className = 'px-3 py-2 rounded-lg ' + (duplikat ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700');
-  li.textContent = `${nama} — ${waktu}${duplikat ? ' (sudah absen sebelumnya)' : ''}`;
+  const colorClass = duplikat ? 'bg-amber-50 text-amber-700' : (status === 'Ijin' ? 'bg-sky-50 text-sky-700' : 'bg-emerald-50 text-emerald-700');
+  li.className = 'px-3 py-2 rounded-lg ' + colorClass;
+  li.textContent = `${nama} — ${status} — ${waktu}${duplikat ? ' (sudah tercatat sebelumnya)' : ''}`;
   list.prepend(li);
 }
 
-// Input manual ID (untuk perangkat tanpa kamera / testing)
 document.getElementById('scan-manual-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const idKegiatan = document.getElementById('scan-kegiatan').value;
-  const idWarga = document.getElementById('scan-manual-input').value.trim();
+  const idWarga = document.getElementById('scan-manual-select').value;
+  const status = document.getElementById('scan-manual-status').value;
   if (!idKegiatan) { toast('Pilih kegiatan dulu', 'error'); return; }
-  if (!idWarga) return;
-  await handleScanResult(idKegiatan, idWarga);
-  e.target.reset();
+  if (!idWarga) { toast('Pilih warga dulu', 'error'); return; }
+  await handleScanResult(idKegiatan, idWarga, status);
+  document.getElementById('scan-manual-select').value = '';
 });
 
 // ---------------------- LAPORAN ----------------------
 let laporanCache = [];
+let laporanWargaMap = {};
 
 document.getElementById('laporan-kegiatan').addEventListener('change', loadLaporan);
 
 async function loadLaporan() {
   const idKegiatan = document.getElementById('laporan-kegiatan').value;
   const tbody = document.getElementById('laporan-tbody');
+  const summaryEl = document.getElementById('laporan-summary');
   document.getElementById('laporan-total').textContent = '';
   if (!idKegiatan) {
     tbody.innerHTML = '<tr><td class="p-3 text-slate-400" colspan="3">Pilih kegiatan untuk melihat rekap.</td></tr>';
+    summaryEl.classList.add('hidden');
     return;
   }
   tbody.innerHTML = '<tr><td class="p-3 text-slate-400" colspan="3">Memuat...</td></tr>';
+  summaryEl.classList.remove('hidden');
   try {
+    if (!wargaCache.length) wargaCache = await apiGet('getWarga');
+    laporanWargaMap = {};
+    wargaCache.forEach(w => { laporanWargaMap[w.ID] = w; });
+
     laporanCache = await apiGet('getAbsensi', { id_kegiatan: idKegiatan });
+    refreshRekap(idKegiatan, 'laporan');
+
     if (!laporanCache.length) {
-      tbody.innerHTML = '<tr><td class="p-3 text-slate-400" colspan="3">Belum ada yang absen.</td></tr>';
+      tbody.innerHTML = '<tr><td class="p-3 text-slate-400" colspan="3">Belum ada yang tercatat.</td></tr>';
       return;
     }
-    tbody.innerHTML = laporanCache.map(a => `
+    tbody.innerHTML = laporanCache.map(a => {
+      const w = laporanWargaMap[a.ID_Warga];
+      const alamat = w ? `${w.NamaRumah || ''} ${w.BlokRumah || ''}${w.NoRumah ? ', No. ' + w.NoRumah : ''}`.trim() : '';
+      const statusColor = a.Status === 'Ijin' ? 'bg-sky-100 text-sky-700' : 'bg-emerald-100 text-emerald-700';
+      return `
       <tr class="border-b border-slate-100">
-        <td class="p-3 font-medium">${escapeHtml(a.Nama)}</td>
+        <td class="p-3">
+          <div class="font-medium">${escapeHtml(a.Nama)}</div>
+          ${alamat ? `<div class="text-xs text-slate-400">${escapeHtml(alamat)}</div>` : ''}
+        </td>
         <td class="p-3">${escapeHtml(a.Waktu)}</td>
-        <td class="p-3"><span class="px-2 py-1 rounded-full text-xs bg-emerald-100 text-emerald-700">${escapeHtml(a.Status)}</span></td>
-      </tr>`).join('');
-    document.getElementById('laporan-total').textContent = `Total hadir: ${laporanCache.length} orang`;
+        <td class="p-3"><span class="px-2 py-1 rounded-full text-xs ${statusColor}">${escapeHtml(a.Status)}</span></td>
+      </tr>`;
+    }).join('');
+    document.getElementById('laporan-total').textContent = `Total tercatat: ${laporanCache.length} orang`;
   } catch (err) {
     tbody.innerHTML = `<tr><td class="p-3 text-red-500" colspan="3">Gagal memuat: ${escapeHtml(err.message)}</td></tr>`;
   }
@@ -333,7 +510,11 @@ async function loadLaporan() {
 
 document.getElementById('laporan-export').addEventListener('click', () => {
   if (!laporanCache.length) { toast('Tidak ada data untuk diekspor', 'error'); return; }
-  const rows = [['Nama', 'Waktu', 'Status'], ...laporanCache.map(a => [a.Nama, a.Waktu, a.Status])];
+  const rows = [['Nama', 'Nama Rumah', 'Blok', 'No Rumah', 'Waktu', 'Status']];
+  laporanCache.forEach(a => {
+    const w = laporanWargaMap[a.ID_Warga] || {};
+    rows.push([a.Nama, w.NamaRumah || '', w.BlokRumah || '', w.NoRumah || '', a.Waktu, a.Status]);
+  });
   const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement('a');
