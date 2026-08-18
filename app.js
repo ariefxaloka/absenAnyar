@@ -2,7 +2,7 @@
 // KONFIGURASI - GANTI DENGAN URL WEB APP GOOGLE APPS SCRIPT KAMU
 // =========================================================
 const CONFIG = {
-  APP_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbwIjnROsDBTUztUijp5H23L0jLBzIFmHIZ0hHGP4o7e4cCC3NorSXK_rA08F1McU-LeyA/exec'
+  APP_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbzaYCHXpZBQWhlnu8WzmKFCqKFhvN0fhh25FQ0tML0eNlmQRC4FGNTeLkUzT1zeSj90sw/exec'
 };
 
 const BLOK_OPTIONS = { JOLIN: ['F', 'G'], PIRES: ['A', 'B', 'C', 'D', 'E'] };
