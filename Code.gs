@@ -4,7 +4,7 @@
  * =========================================================
  *
  * Sheet yang dipakai (dibuat OTOMATIS saat pertama kali dipanggil):
- *  - Warga    : ID | Nama | NamaRumah | BlokRumah | NoRumah | NoHP | TanggalDaftar
+ *  - Warga    : ID | Nama | NamaRumah | BlokRumah | NoRumah | NoHP | TanggalDaftar | QrUrl
  *  - Kegiatan : ID | Nama | Tanggal | JamMulai | JamSelesai | Lokasi
  *               (Status dihitung otomatis dari Tanggal+Jam, TIDAK disimpan statis)
  *  - Absensi  : ID | ID_Kegiatan | ID_Warga | Nama | Waktu | Status   (Hadir / Ijin)
@@ -14,15 +14,17 @@
  *  2. Extensions > Apps Script (WAJIB dari dalam Sheet ini).
  *  3. Hapus isi default, tempel SELURUH isi file ini.
  *  4. Deploy > New deployment > Type: Web app. Execute as: Me. Access: Anyone.
- *  5. Authorize akses (kali ini akan minta izin TAMBAHAN untuk Google Drive
- *     & Google Docs karena ada fitur simpan QR/Laporan PDF - ini normal).
+ *  5. Authorize akses (minta izin Google Drive & Google Docs untuk fitur QR/PDF).
  *  6. Salin Web App URL ke CONFIG.APP_SCRIPT_URL di webapp/app.js.
  *  7. Setiap ubah kode: Deploy > Manage deployments > Edit > New version.
  *
  * MIGRASI DARI VERSI LAMA:
- *  - migrateWargaSheet()    -> ganti RT/RW/Alamat jadi NamaRumah/BlokRumah/NoRumah
+ *  - migrateWargaSheet()    -> RT/RW/Alamat -> NamaRumah/BlokRumah/NoRumah, + tambah kolom QrUrl
  *  - migrateKegiatanSheet() -> tambah kolom JamMulai/JamSelesai
  *  Jalankan manual sekali (pilih fungsi di dropdown editor, klik Run ▶️).
+ *
+ * PASSWORD MENU FOLDER QR: default "4dmin54321", ganti lewat Script Properties
+ * key FOLDER_QR_PASSWORD.
  *
  * CATATAN METODE HTTP: semua aksi (baca & tulis) lewat GET (query string),
  * bukan POST, karena redirect 302 Web App Apps Script membuang body POST.
@@ -69,7 +71,7 @@ function getOrCreateSheet(name, headers) {
 }
 
 function sheetWarga() {
-  return getOrCreateSheet(SHEET_WARGA, ['ID', 'Nama', 'NamaRumah', 'BlokRumah', 'NoRumah', 'NoHP', 'TanggalDaftar']);
+  return getOrCreateSheet(SHEET_WARGA, ['ID', 'Nama', 'NamaRumah', 'BlokRumah', 'NoRumah', 'NoHP', 'TanggalDaftar', 'QrUrl']);
 }
 function sheetKegiatan() {
   return getOrCreateSheet(SHEET_KEGIATAN, ['ID', 'Nama', 'Tanggal', 'JamMulai', 'JamSelesai', 'Lokasi']);
@@ -98,9 +100,13 @@ function migrateWargaSheet() {
     return h;
   });
   if (changed) sheet.getRange(1, 1, 1, lastCol).setValues([newHeaders]);
-  const headers2 = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  let headers2 = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   if (headers2.indexOf('NoRumah') === -1) {
     sheet.getRange(1, headers2.length + 1).setValue('NoRumah');
+    headers2 = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  }
+  if (headers2.indexOf('QrUrl') === -1) {
+    sheet.getRange(1, headers2.length + 1).setValue('QrUrl');
   }
   Logger.log('Migrasi Warga selesai. Header saat ini: ' + sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].join(', '));
 }
@@ -191,6 +197,24 @@ function validateBlok(namaRumah, blokRumah) {
   }
 }
 
+// Cek duplikat alamat (NamaRumah-BlokRumah-NoRumah). excludeId dipakai saat edit
+// supaya warga tidak dianggap duplikat terhadap dirinya sendiri.
+function checkDuplicateAlamat(namaRumah, blokRumah, noRumah, excludeId, existingList) {
+  const all = existingList || sheetToObjects(sheetWarga());
+  const nr = String(namaRumah || '').trim().toUpperCase();
+  const bl = String(blokRumah || '').trim().toUpperCase();
+  const no = String(noRumah || '').trim().toUpperCase();
+  const dup = all.find(function (w) {
+    if (excludeId && w.ID === excludeId) return false;
+    return String(w.NamaRumah || '').trim().toUpperCase() === nr &&
+           String(w.BlokRumah || '').trim().toUpperCase() === bl &&
+           String(w.NoRumah || '').trim().toUpperCase() === no;
+  });
+  if (dup) {
+    throw new Error('DUPLIKAT: Alamat ' + namaRumah + ' ' + blokRumah + ' No. ' + (noRumah || '-') + ' sudah terdaftar atas nama ' + dup.Nama);
+  }
+}
+
 function json(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
@@ -221,6 +245,11 @@ function checkPin(pin) {
   return String(pin || '') === getAdminPin();
 }
 
+// Password khusus menu Folder QR (lapisan kedua, terpisah dari PIN utama)
+function getFolderPassword() {
+  return PropertiesService.getScriptProperties().getProperty('FOLDER_QR_PASSWORD') || '4dmin54321';
+}
+
 // ---------------------- NOTIFIKASI WHATSAPP (opsional) ----------------------
 function sendWhatsAppNotif(pesan) {
   const props = PropertiesService.getScriptProperties();
@@ -244,7 +273,7 @@ function qrPdfFileName(warga) {
   return 'QR_' + (warga.NamaRumah || '-') + '_' + (warga.BlokRumah || '-') + '_' + (warga.NoRumah || '-') + '.pdf';
 }
 
-// Buat QR + PDF (label Nama Rumah/Blok/No Rumah di atas QR) lalu simpan ke folder.
+// Buat QR + PDF (QR & label rata TENGAH, ada ikon rumah) lalu simpan ke folder.
 // Kalau file dengan nama sama sudah ada, file lama dibuang dulu (rewrite, bukan duplikat).
 function generateWargaQrPdf(warga) {
   const folderId = getDriveFolderId();
@@ -256,19 +285,28 @@ function generateWargaQrPdf(warga) {
   if (qrResponse.getResponseCode() !== 200) throw new Error('Gagal membuat gambar QR untuk ' + warga.Nama);
   const qrBlob = qrResponse.getBlob().setName('qr.png');
 
-  const label = (warga.NamaRumah || '-') + ' ' + (warga.BlokRumah || '-') + (warga.NoRumah ? ' No. ' + warga.NoRumah : '');
+  const label = '🏠 ' + (warga.NamaRumah || '-') + ' ' + (warga.BlokRumah || '-') + (warga.NoRumah ? ' No. ' + warga.NoRumah : '');
   const fileName = qrPdfFileName(warga);
 
   const doc = DocumentApp.create('TEMP_' + fileName);
   const body = doc.getBody();
   body.clear();
+
   const labelPara = body.appendParagraph(label);
   labelPara.setHeading(DocumentApp.ParagraphHeading.HEADING2);
   labelPara.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+
   const img = body.appendImage(qrBlob);
   img.setWidth(250);
   img.setHeight(250);
-  body.appendParagraph(warga.Nama || '').setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+  const imgParent = img.getParent();
+  if (imgParent && imgParent.getType() === DocumentApp.ElementType.PARAGRAPH) {
+    imgParent.asParagraph().setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+  }
+
+  const namaPara = body.appendParagraph(warga.Nama || '');
+  namaPara.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+
   doc.saveAndClose();
 
   const pdfBlob = DriveApp.getFileById(doc.getId()).getAs(MimeType.PDF).setName(fileName);
@@ -360,26 +398,54 @@ function handleRequest(params) {
         const namaRumah = params.namaRumah || '';
         const blokRumah = params.blokRumah || '';
         validateBlok(namaRumah, blokRumah);
+        checkDuplicateAlamat(namaRumah, blokRumah, params.noRumah, null);
+
         const id = generateId('WRG');
         appendRowByHeaders(sheet, {
           ID: id, Nama: params.nama || '', NamaRumah: namaRumah, BlokRumah: blokRumah,
           NoRumah: params.noRumah || '', NoHP: params.nohp || '',
-          TanggalDaftar: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')
+          TanggalDaftar: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
+          QrUrl: ''
         });
-        result = { id: id };
+
+        let qrSaved = false, qrUrl = '';
+        try {
+          const saved = generateWargaQrPdf({ ID: id, Nama: params.nama || '', NamaRumah: namaRumah, BlokRumah: blokRumah, NoRumah: params.noRumah || '' });
+          updateRowById(sheet, id, { QrUrl: saved.fileUrl });
+          qrSaved = true; qrUrl = saved.fileUrl;
+        } catch (e) { /* folder belum diatur - warga tetap tersimpan, QR bisa dibuat manual nanti */ }
+
+        result = { id: id, qrSaved: qrSaved, qrUrl: qrUrl };
         break;
       }
 
       case 'updateWarga': {
+        if (!params.id) throw new Error('id wajib diisi');
         const namaRumah = params.namaRumah || '';
         const blokRumah = params.blokRumah || '';
         validateBlok(namaRumah, blokRumah);
-        if (!params.id) throw new Error('id wajib diisi');
-        updateRowById(sheetWarga(), params.id, {
+        checkDuplicateAlamat(namaRumah, blokRumah, params.noRumah, params.id);
+
+        const sheet = sheetWarga();
+        const oldWarga = sheetToObjects(sheet).find(function (w) { return w.ID === params.id; });
+
+        updateRowById(sheet, params.id, {
           Nama: params.nama || '', NamaRumah: namaRumah, BlokRumah: blokRumah,
           NoRumah: params.noRumah || '', NoHP: params.nohp || ''
         });
-        result = { id: params.id };
+
+        const newWarga = { ID: params.id, Nama: params.nama || '', NamaRumah: namaRumah, BlokRumah: blokRumah, NoRumah: params.noRumah || '' };
+        let qrSaved = false, qrUrl = '';
+        try {
+          if (oldWarga && qrPdfFileName(oldWarga) !== qrPdfFileName(newWarga)) {
+            deleteWargaQrFile(oldWarga);
+          }
+          const saved = generateWargaQrPdf(newWarga);
+          updateRowById(sheet, params.id, { QrUrl: saved.fileUrl });
+          qrSaved = true; qrUrl = saved.fileUrl;
+        } catch (e) { /* folder belum diatur - lanjut tanpa memperbarui QR */ }
+
+        result = { id: params.id, qrSaved: qrSaved, qrUrl: qrUrl };
         break;
       }
 
@@ -409,7 +475,64 @@ function handleRequest(params) {
         break;
       }
 
+      // Import massal dari CSV. data = JSON string array of {nama,namaRumah,blokRumah,noRumah}
+      case 'importWarga': {
+        let records;
+        try { records = JSON.parse(params.data || '[]'); } catch (e) { throw new Error('Format data import tidak valid'); }
+        if (!Array.isArray(records)) throw new Error('Format data import tidak valid');
+
+        const sheet = sheetWarga();
+        const existing = sheetToObjects(sheet);
+        let imported = 0, skipped = 0, gagal = 0;
+        const errors = [];
+
+        records.forEach(function (r) {
+          try {
+            const nama = (r.nama || '').toString().trim();
+            const namaRumah = (r.namaRumah || '').toString().trim().toUpperCase();
+            const blokRumah = (r.blokRumah || '').toString().trim().toUpperCase();
+            const noRumah = (r.noRumah || '').toString().trim();
+
+            if (!nama || !namaRumah || !blokRumah) { gagal++; errors.push((nama || '(tanpa nama)') + ': data tidak lengkap'); return; }
+            validateBlok(namaRumah, blokRumah);
+
+            const isDup = existing.some(function (w) {
+              return String(w.NamaRumah || '').toUpperCase() === namaRumah &&
+                     String(w.BlokRumah || '').toUpperCase() === blokRumah &&
+                     String(w.NoRumah || '').trim().toUpperCase() === noRumah.toUpperCase();
+            });
+            if (isDup) { skipped++; return; }
+
+            const id = generateId('WRG');
+            appendRowByHeaders(sheet, {
+              ID: id, Nama: nama, NamaRumah: namaRumah, BlokRumah: blokRumah, NoRumah: noRumah,
+              NoHP: '', TanggalDaftar: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'), QrUrl: ''
+            });
+            existing.push({ ID: id, Nama: nama, NamaRumah: namaRumah, BlokRumah: blokRumah, NoRumah: noRumah });
+
+            try {
+              const saved = generateWargaQrPdf({ ID: id, Nama: nama, NamaRumah: namaRumah, BlokRumah: blokRumah, NoRumah: noRumah });
+              updateRowById(sheet, id, { QrUrl: saved.fileUrl });
+            } catch (eQr) { /* folder mungkin belum diatur, lanjutkan tanpa QR */ }
+
+            imported++;
+          } catch (eRow) {
+            gagal++;
+            errors.push((r.nama || '(tanpa nama)') + ': ' + eRow.message);
+          }
+        });
+
+        result = { imported: imported, skipped: skipped, gagal: gagal, errors: errors };
+        break;
+      }
+
       // ---------------- FOLDER QR ----------------
+      case 'checkFolderPassword': {
+        if (String(params.password || '') !== getFolderPassword()) throw new Error('Password salah');
+        result = { ok: true };
+        break;
+      }
+
       case 'setFolderId': {
         const folderId = String(params.folderId || '').trim();
         if (!folderId) throw new Error('ID Folder wajib diisi');
@@ -435,17 +558,23 @@ function handleRequest(params) {
       case 'generateQrPdf': {
         const warga = sheetToObjects(sheetWarga()).find(function (w) { return w.ID === params.id_warga; });
         if (!warga) throw new Error('Warga tidak ditemukan');
-        result = generateWargaQrPdf(warga);
+        const saved = generateWargaQrPdf(warga);
+        updateRowById(sheetWarga(), warga.ID, { QrUrl: saved.fileUrl });
+        result = saved;
         break;
       }
 
       case 'generateAllQrPdf': {
-        const allWarga = sheetToObjects(sheetWarga());
+        const sheet = sheetWarga();
+        const allWarga = sheetToObjects(sheet);
         let sukses = 0, gagal = 0;
         const errors = [];
         allWarga.forEach(function (w) {
-          try { generateWargaQrPdf(w); sukses++; }
-          catch (e) { gagal++; errors.push(w.Nama + ': ' + e.message); }
+          try {
+            const saved = generateWargaQrPdf(w);
+            updateRowById(sheet, w.ID, { QrUrl: saved.fileUrl });
+            sukses++;
+          } catch (e) { gagal++; errors.push(w.Nama + ': ' + e.message); }
         });
         result = { sukses: sukses, gagal: gagal, errors: errors };
         break;
