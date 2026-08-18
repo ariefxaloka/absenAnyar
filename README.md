@@ -96,6 +96,17 @@ Aplikasi mengecek data terbaru setiap **12 detik** secara otomatis selama kamu l
 ### Izin akses tambahan yang perlu di-otorisasi ulang
 Karena ada fitur baru yang memakai Google Drive & Google Docs (simpan QR, buat laporan PDF), saat re-deploy kamu akan diminta **otorisasi ulang** dengan izin tambahan (Drive & Docs). Ini normal — cukup ikuti alur "Advanced > Go to (nama project) > Allow" seperti sebelumnya.
 
+## Fitur Terbaru — Menu Warga & QR (auto-save, anti-duplikat, import/export)
+- **QR otomatis ke Drive**: begitu warga ditambahkan atau diperbarui, QR-nya langsung dibuat & disimpan ke folder Drive yang sudah diatur — tidak perlu tombol simpan manual lagi. Kalau folder belum diatur, data warga tetap tersimpan (QR menyusul setelah folder diatur, lewat ikon unduh atau tombol "Buat Ulang Semua QR").
+- **Kolom Aksi berbentuk ikon**: ikon unduh (buka/unduh QR dari Drive — otomatis membuat dulu kalau belum ada), pensil (Edit), tempat sampah (Hapus). Modal "lihat QR" (PNG) sudah dihapus, digantikan akses langsung ke file PDF di Drive.
+- **Cek duplikat alamat**: kombinasi Nama Rumah + Blok + No. Rumah tidak boleh sama dengan warga lain. Kalau terdeteksi, muncul **popup peringatan** dan data tidak disimpan.
+- **Import CSV**: buka "📥 Import Data Warga dari CSV" di panel Warga. Format kolom: `Nama,NamaRumah,Blok,NoRumah` (baris pertama header). Data yang alamatnya sudah terdaftar otomatis dilewati (dilaporkan lewat popup), sisanya langsung dibuatkan QR ke Drive.
+- **Export Excel**: tombol hijau "Export Excel" mengunduh seluruh data warga (termasuk tanggal daftar) sebagai file `.xlsx`.
+- PDF QR kini: QR & label rata **tengah**, dengan ikon 🏠 di depan label alamat.
+
+## Fitur Terbaru — Menu Folder QR (terkunci password)
+Menu ini sekarang minta **password terpisah** dari PIN utama sebelum bisa dibuka — default: `4dmin54321`. Ganti lewat Script Properties key **`FOLDER_QR_PASSWORD`**. Password ini hanya perlu dimasukkan sekali per sesi login (tidak diminta ulang tiap pindah tab, sampai kamu logout).
+
 
 ## LANGKAH 1B — Atur PIN Admin & Notifikasi WhatsApp (opsional tapi disarankan)
 
