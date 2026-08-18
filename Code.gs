@@ -127,6 +127,25 @@ function migrateKegiatanSheet() {
 }
 
 // ---------------------- Generic row helpers ----------------------
+// Google Sheets sering menyimpan input tanggal/jam sebagai objek Date internal.
+// Kalau dibiarkan, JSON.stringify akan mengubahnya jadi ISO string mentah
+// (mis. "2026-08-17T17:00:00.000Z") yang salah tampil di frontend. Fungsi ini
+// mengonversi setiap nilai Date jadi string yang sudah diformat dengan benar,
+// konsisten memakai timezone script (bukan UTC).
+function normalizeCellValue(value) {
+  if (!(value instanceof Date)) return value;
+  const tz = Session.getScriptTimeZone();
+  // Sel "jam saja" (mis. input type=time) disimpan Sheets dengan tanggal basis 1899-12-30
+  if (value.getFullYear() === 1899) {
+    return Utilities.formatDate(value, tz, 'HH:mm');
+  }
+  const jamBerarti = value.getHours() !== 0 || value.getMinutes() !== 0 || value.getSeconds() !== 0;
+  if (jamBerarti) {
+    return Utilities.formatDate(value, tz, 'yyyy-MM-dd HH:mm:ss');
+  }
+  return Utilities.formatDate(value, tz, 'yyyy-MM-dd');
+}
+
 function sheetToObjects(sheet) {
   const data = sheet.getDataRange().getValues();
   if (data.length < 2) return [];
@@ -136,7 +155,7 @@ function sheetToObjects(sheet) {
     .filter(function (r) { return r.some(function (c) { return c !== '' && c !== null; }); })
     .map(function (r) {
       const obj = {};
-      headers.forEach(function (h, i) { obj[h] = r[i]; });
+      headers.forEach(function (h, i) { obj[h] = normalizeCellValue(r[i]); });
       return obj;
     });
 }
