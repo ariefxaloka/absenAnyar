@@ -66,6 +66,36 @@ Kalau spreadsheet kamu sudah pernah dipakai dengan skema lama:
 ## Fitur Baru — Menu Laporan
 - Kolom **Nama** sekarang menampilkan alamat (Nama Rumah, Blok, No. Rumah) di bawah nama, dengan huruf lebih kecil & warna abu-abu supaya beda dari nama.
 - Kartu ringkasan Hadir / Ijin / Tidak Hadir juga muncul di sini, dan Export CSV kini menyertakan kolom Nama Rumah, Blok, dan No. Rumah.
+- **Tombol Export PDF**: membuat laporan absensi dalam bentuk PDF (nama file `Kegiatan_yyyyMMdd_HHmmss.pdf`) dan langsung diunduh browser — **tidak** disimpan ke Google Drive, cuma dibuat sementara lalu dikirim ke kamu sebagai file unduhan.
+- Kalau kegiatan sudah berstatus **Selesai** (lewat jam selesai), tabel laporan (dan PDF-nya) otomatis menambahkan baris warga yang **Tidak Hadir**, dihitung dari total warga dikurangi yang sudah Hadir/Ijin.
+
+## Fitur Baru — Format Tanggal Indonesia
+Semua tanggal di aplikasi (tabel Kegiatan, log scan, laporan, dsb.) ditampilkan format **"Hari, Tanggal Bulan Tahun"**, contoh: `Senin, 8 Agustus 2026`. Untuk data yang menyertakan jam (log absensi), formatnya jadi `Senin, 8 Agustus 2026 10:15`.
+
+## Fitur Baru — Sinkronisasi Otomatis (tanpa refresh/logout)
+Aplikasi mengecek data terbaru setiap **12 detik** secara otomatis selama kamu login:
+- Dropdown **"Pilih Warga"** di menu Scan Absensi selalu ikut ter-update kalau ada warga baru/diubah/dihapus, walau kamu sedang di tab lain.
+- Tab yang sedang aktif (Kegiatan, Warga, Scan, Laporan) ikut menyegarkan datanya sendiri secara diam-diam, tanpa mengganggu form yang sedang kamu isi atau filter yang sedang kamu pakai.
+
+## Fitur Baru — Menu Kegiatan
+- Field baru **Jam Mulai** & **Jam Selesai** — status kegiatan dihitung otomatis dari kombinasi Tanggal + rentang jam ini:
+  - Sebelum Jam Mulai → **Terjadwal**
+  - Di antara Jam Mulai s/d Jam Selesai → **Aktif**
+  - Setelah Jam Selesai → **Selesai**
+  - Status ini **tidak disimpan statis** di sheet, jadi selalu akurat tiap kali dibuka (termasuk lewat sinkronisasi otomatis di atas).
+- Tabel sekarang punya **nomor urut**, tombol **Edit**, **Hapus** per baris, dan tombol **Hapus Semua**.
+- Menghapus kegiatan (satu atau semua) otomatis ikut menghapus seluruh data absensi yang terkait kegiatan tsb (mencegah data "yatim").
+
+## Fitur Baru — Menu Folder QR & Simpan QR ke Google Drive
+- Menu utama baru **"Folder QR"**: masukkan ID folder Google Drive tujuan (disalin dari URL folder), klik Simpan.
+- Di tabel Warga, tombol **"Simpan Drive"** per baris membuat QR + PDF berlabel *Nama Rumah Blok No. Rumah* di atas QR, lalu menyimpannya ke folder tsb. Nama file: `QR_NamaRumah_Blok_NoRumah.pdf` (contoh: `QR_JOLIN_F_12.pdf`).
+- Kalau file dengan nama sama sudah ada di folder, file lama otomatis **dibuang dan diganti** (rewrite), bukan menumpuk jadi duplikat.
+- Tombol **"Simpan Semua QR ke Drive"** di atas tabel Warga memproses seluruh warga sekaligus (laporan sukses/gagal ditampilkan setelah selesai — untuk jumlah warga sangat banyak, proses ini bisa memakan beberapa menit karena batas eksekusi Apps Script per panggilan ±6 menit).
+- **Menghapus warga** (satu, terpilih, atau lewat aksi lain) otomatis ikut menghapus file QR PDF-nya di Google Drive, supaya tidak ada file "nyasar".
+
+### Izin akses tambahan yang perlu di-otorisasi ulang
+Karena ada fitur baru yang memakai Google Drive & Google Docs (simpan QR, buat laporan PDF), saat re-deploy kamu akan diminta **otorisasi ulang** dengan izin tambahan (Drive & Docs). Ini normal — cukup ikuti alur "Advanced > Go to (nama project) > Allow" seperti sebelumnya.
+
 
 ## LANGKAH 1B — Atur PIN Admin & Notifikasi WhatsApp (opsional tapi disarankan)
 
@@ -174,6 +204,13 @@ Dua project ini sepenuhnya terpisah — satu-satunya "penghubung" adalah URL Web
 ### Muncul error "PIN salah atau sesi tidak valid"
 - Pastikan `ADMIN_PIN` di Script Properties sama persis dengan PIN yang kamu ketik di layar login.
 - Kalau baru saja mengganti `ADMIN_PIN`, PIN lama yang tersimpan di browser (localStorage) jadi tidak valid — klik **Keluar** lalu login ulang dengan PIN baru.
+
+### Muncul error "Folder tidak ditemukan atau tidak bisa diakses" saat setup Folder QR
+- Pastikan ID folder yang ditempel benar (bukan URL lengkap — cuma bagian ID setelah `/folders/`).
+- Pastikan folder tsb bisa diakses oleh akun Google yang dipakai untuk deploy Apps Script (folder di My Drive akun sendiri, atau folder shared yang sudah kamu buka aksesnya).
+
+### Simpan QR ke Drive gagal / lambat untuk banyak warga
+- Apps Script punya batas eksekusi ±6 menit per pemanggilan. Kalau warga sangat banyak (ratusan), tombol "Simpan Semua QR ke Drive" bisa timeout. Solusinya: simpan bertahap lewat tombol "Simpan Drive" per baris, atau bagi proses dalam beberapa kali klik.
 
 ## Pengembangan lanjutan (opsional)
 - Tambah foto warga saat daftar (disimpan ke Google Drive via Apps Script).
