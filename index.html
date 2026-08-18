@@ -7,6 +7,8 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   #tab-kegiatan, #tab-warga, #tab-scan, #tab-laporan, #tab-folder {
     background-color: #ffffff; color: #475569; border: 1px solid #e2e8f0;
@@ -110,6 +112,7 @@
     <section id="panel-warga" class="hidden space-y-4">
       <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
         <h2 id="warga-form-title" class="font-semibold mb-3">Daftarkan Warga</h2>
+        <p class="text-xs text-slate-400 mb-3">QR Code akan dibuat &amp; disimpan otomatis ke Google Drive begitu data disimpan (pastikan Folder QR sudah diatur).</p>
         <form id="form-warga" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <input name="nama" required placeholder="Nama lengkap" class="border rounded-lg px-3 py-2 text-sm sm:col-span-2" />
           <select name="namaRumah" id="warga-namaRumah" required class="border rounded-lg px-3 py-2 text-sm">
@@ -125,6 +128,18 @@
             <button type="button" id="warga-cancel-edit" class="hidden bg-slate-200 rounded-lg px-4 text-sm font-medium hover:bg-slate-300">Batal Edit</button>
           </div>
         </form>
+
+        <details class="text-sm border-t pt-3 mt-4">
+          <summary class="cursor-pointer text-slate-600 font-medium">📥 Import Data Warga dari CSV</summary>
+          <div class="mt-2 space-y-2">
+            <p class="text-xs text-slate-500">Format kolom CSV (baris pertama header): <code>Nama,NamaRumah,Blok,NoRumah</code>. QR setiap data yang berhasil diimpor akan otomatis dibuat &amp; disimpan ke Drive; alamat yang sudah terdaftar otomatis dilewati.</p>
+            <div class="flex flex-col sm:flex-row gap-2">
+              <input type="file" id="import-csv-input" accept=".csv" class="text-sm border rounded-lg px-3 py-2 flex-1" />
+              <button id="import-csv-btn" class="bg-teal-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-teal-700 whitespace-nowrap">Proses Import</button>
+            </div>
+            <p id="import-csv-status" class="text-xs text-slate-500"></p>
+          </div>
+        </details>
       </div>
 
       <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
@@ -140,7 +155,11 @@
 
         <div class="flex flex-wrap gap-2 mb-3">
           <button id="warga-bulk-delete" class="hidden bg-red-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-red-700">Hapus Terpilih</button>
-          <button id="warga-save-all-drive" class="bg-purple-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-purple-700">Simpan Semua QR ke Drive</button>
+          <button id="warga-save-all-drive" class="bg-purple-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-purple-700">Buat Ulang Semua QR ke Drive</button>
+          <button id="warga-export-excel" title="Export Excel" class="ml-auto flex items-center gap-1.5 bg-emerald-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-emerald-700">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 3h7l5 5v13a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 13l6 6M15 13l-6 6"/></svg>
+            Export Excel
+          </button>
         </div>
 
         <div class="overflow-x-auto">
@@ -248,9 +267,20 @@
       </div>
     </section>
 
-    <!-- PANEL: FOLDER QR -->
+    <!-- PANEL: FOLDER QR (terkunci password) -->
     <section id="panel-folder" class="hidden space-y-4">
-      <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100 space-y-3">
+      <div id="folder-password-overlay" class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 max-w-sm mx-auto text-center space-y-3">
+        <div class="text-3xl">🔒</div>
+        <h2 class="font-semibold">Menu Terkunci</h2>
+        <p class="text-sm text-slate-500">Masukkan password untuk mengakses Setup Folder QR</p>
+        <form id="folder-password-form" class="space-y-2">
+          <input id="folder-password-input" type="password" required placeholder="Password" class="border rounded-lg px-3 py-2 text-sm w-full text-center" />
+          <p id="folder-password-error" class="hidden text-red-600 text-xs"></p>
+          <button class="w-full bg-indigo-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-indigo-700">Buka</button>
+        </form>
+      </div>
+
+      <div id="folder-content" class="hidden bg-white rounded-xl p-4 shadow-sm border border-slate-100 space-y-3">
         <h2 class="font-semibold">Setup Folder Penyimpanan QR Code</h2>
         <p class="text-sm text-slate-500">
           QR Code tiap warga (dalam bentuk PDF berlabel Nama Rumah/Blok/No. Rumah) akan disimpan ke folder
@@ -267,15 +297,13 @@
 
   </main>
 
-  <!-- MODAL QR -->
-  <div id="qr-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-40">
-    <div class="bg-white rounded-xl p-5 w-full max-w-xs text-center space-y-3">
-      <h3 id="qr-modal-nama" class="font-semibold"></h3>
-      <canvas id="qr-canvas" class="mx-auto"></canvas>
-      <div class="flex gap-2">
-        <button id="qr-download" class="flex-1 bg-indigo-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-indigo-700">Unduh PNG</button>
-        <button id="qr-modal-close" class="flex-1 bg-slate-200 rounded-lg py-2 text-sm font-medium hover:bg-slate-300">Tutup</button>
-      </div>
+  <!-- MODAL PERINGATAN (mis. data duplikat) -->
+  <div id="warning-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-xl p-5 w-full max-w-sm text-center space-y-3">
+      <div class="text-3xl">⚠️</div>
+      <h3 class="font-semibold text-red-700">Data Duplikat</h3>
+      <p id="warning-modal-text" class="text-sm text-slate-600"></p>
+      <button id="warning-modal-close" class="w-full bg-slate-200 rounded-lg py-2 text-sm font-medium hover:bg-slate-300">Tutup</button>
     </div>
   </div>
 
