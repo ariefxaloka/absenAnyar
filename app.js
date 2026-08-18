@@ -2,7 +2,7 @@
 // KONFIGURASI - GANTI DENGAN URL WEB APP GOOGLE APPS SCRIPT KAMU
 // =========================================================
 const CONFIG = {
-  APP_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbzaYCHXpZBQWhlnu8WzmKFCqKFhvN0fhh25FQ0tML0eNlmQRC4FGNTeLkUzT1zeSj90sw/exec'
+  APP_SCRIPT_URL: 'PASTE_URL_WEB_APP_APPS_SCRIPT_DI_SINI'
 };
 
 const BLOK_OPTIONS = { JOLIN: ['F', 'G'], PIRES: ['A', 'B', 'C', 'D', 'E'] };
@@ -22,6 +22,21 @@ function formatWaktuIndo(datetimeStr) {
   const tanggal = formatTanggalIndo(parts[0]);
   const jam = parts[1] ? parts[1].slice(0, 5) : '';
   return jam ? `${tanggal} ${jam}` : tanggal;
+}
+// Jam saja -> "HH:MM" (memotong detik kalau ada, aman untuk nilai kosong)
+function formatJam(jamStr) {
+  if (!jamStr) return '-';
+  return String(jamStr).slice(0, 5);
+}
+// Datetime (yyyy-MM-dd HH:mm:ss) -> "DD/MM/YYYY-HH:MM:SS", dipakai khusus di tabel Laporan
+function formatWaktuNumerik(datetimeStr) {
+  if (!datetimeStr || datetimeStr === '-') return '-';
+  const parts = String(datetimeStr).split(' ');
+  const tglParts = parts[0].split('-');
+  if (tglParts.length !== 3) return datetimeStr;
+  const [y, m, d] = tglParts;
+  const jam = parts[1] || '00:00:00';
+  return `${d}/${m}/${y}-${jam}`;
 }
 
 // ---------------------- Ikon inline (SVG) ----------------------
@@ -91,7 +106,6 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     document.getElementById('login-overlay').classList.add('hidden');
     document.getElementById('app-root').classList.remove('hidden');
     showTab('kegiatan');
-    startAutoSync();
   } catch (err) {
     clearPin();
     errEl.textContent = err.message;
@@ -101,7 +115,6 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
 
 document.getElementById('logout-btn').addEventListener('click', () => {
   clearPin();
-  stopAutoSync();
   folderUnlocked = false;
   document.getElementById('app-root').classList.add('hidden');
   document.getElementById('login-overlay').classList.remove('hidden');
@@ -115,7 +128,6 @@ async function tryAutoLogin() {
     document.getElementById('login-overlay').classList.add('hidden');
     document.getElementById('app-root').classList.remove('hidden');
     showTab('kegiatan');
-    startAutoSync();
   } catch (err) {
     clearPin();
   }
@@ -162,40 +174,6 @@ document.getElementById('folder-password-form').addEventListener('submit', async
   }
 });
 
-// ---------------------- AUTO SYNC (tanpa refresh/logout) ----------------------
-let syncTimer = null;
-function startAutoSync() {
-  if (syncTimer) return;
-  syncTimer = setInterval(autoSync, 12000);
-}
-function stopAutoSync() {
-  if (syncTimer) { clearInterval(syncTimer); syncTimer = null; }
-}
-
-async function autoSync() {
-  if (!getPin()) return;
-  try {
-    const freshWarga = await apiGet('getWarga');
-    scanWargaCache = freshWarga;
-    populateScanManualSelect();
-
-    if (activeTab === 'warga') {
-      wargaCache = freshWarga;
-      Array.from(wargaSelected).forEach(id => { if (!freshWarga.some(w => w.ID === id)) wargaSelected.delete(id); });
-      updateBulkDeleteButton();
-      applyWargaFilter();
-    } else if (activeTab === 'kegiatan') {
-      loadKegiatanList();
-    } else if (activeTab === 'scan') {
-      const idK = document.getElementById('scan-kegiatan').value;
-      if (idK) refreshRekap(idK, 'scan');
-    } else if (activeTab === 'laporan') {
-      const idK = document.getElementById('laporan-kegiatan').value;
-      if (idK) loadLaporan();
-    }
-  } catch (err) { /* diam-diam */ }
-}
-
 // ---------------------- Blok Rumah dependent dropdown ----------------------
 function populateBlokSelect(selectEl, namaRumah, selectedValue, includeAllOption) {
   const options = namaRumah && BLOK_OPTIONS[namaRumah] ? BLOK_OPTIONS[namaRumah] : ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
@@ -228,7 +206,7 @@ async function loadKegiatanList() {
         <td class="p-3 text-slate-400">${idx + 1}</td>
         <td class="p-3 font-medium">${escapeHtml(k.Nama)}</td>
         <td class="p-3">${escapeHtml(formatTanggalIndo(k.Tanggal))}</td>
-        <td class="p-3 whitespace-nowrap">${escapeHtml(k.JamMulai || '-')} - ${escapeHtml(k.JamSelesai || '-')}</td>
+        <td class="p-3 whitespace-nowrap">${escapeHtml(formatJam(k.JamMulai))} - ${escapeHtml(formatJam(k.JamSelesai))}</td>
         <td class="p-3">${escapeHtml(k.Lokasi)}</td>
         <td class="p-3"><span class="px-2 py-1 rounded-full text-xs ${statusBadgeClass(k.Status)}">${escapeHtml(k.Status)}</span></td>
         <td class="p-3 space-x-2 whitespace-nowrap">
@@ -347,16 +325,36 @@ populateBlokSelect(filterBlok, '', '', true);
 filterBlok.addEventListener('change', applyWargaFilter);
 document.getElementById('warga-search').addEventListener('input', applyWargaFilter);
 
+// Dipanggil setiap kali ada perubahan data warga (tambah/edit/hapus/import).
+// Selalu menyegarkan dropdown "Pilih Warga" di Absensi, dan me-ripple ke tab
+// Scan/Laporan yang sedang aktif - tanpa perlu polling atau refresh manual.
 async function loadWargaList() {
   const tbody = document.getElementById('warga-tbody');
-  tbody.innerHTML = '<tr><td class="p-3 text-slate-400" colspan="6">Memuat...</td></tr>';
+  const isWargaTabActive = activeTab === 'warga';
+  if (isWargaTabActive) tbody.innerHTML = '<tr><td class="p-3 text-slate-400" colspan="6">Memuat...</td></tr>';
   try {
-    wargaCache = await apiGet('getWarga');
-    wargaSelected.clear();
+    const fresh = await apiGet('getWarga');
+    wargaCache = fresh;
+
+    // Selalu segarkan dropdown "Pilih Warga" di menu Absensi, apapun tab aktif
+    scanWargaCache = fresh;
+    populateScanManualSelect();
+
+    Array.from(wargaSelected).forEach(id => { if (!fresh.some(w => w.ID === id)) wargaSelected.delete(id); });
     updateBulkDeleteButton();
-    applyWargaFilter();
+    if (isWargaTabActive) applyWargaFilter();
+
+    // Ripple ke tab lain yang datanya bergantung pada Data Warga
+    if (activeTab === 'scan') {
+      const idK = document.getElementById('scan-kegiatan').value;
+      if (idK) refreshRekap(idK, 'scan');
+    }
+    if (activeTab === 'laporan') {
+      const idK = document.getElementById('laporan-kegiatan').value;
+      if (idK) loadLaporan();
+    }
   } catch (err) {
-    tbody.innerHTML = `<tr><td class="p-3 text-red-500" colspan="6">Gagal memuat: ${escapeHtml(err.message)}</td></tr>`;
+    if (isWargaTabActive) tbody.innerHTML = `<tr><td class="p-3 text-red-500" colspan="6">Gagal memuat: ${escapeHtml(err.message)}</td></tr>`;
   }
 }
 
@@ -770,7 +768,7 @@ function renderLaporanTable() {
           <div class="font-medium">${escapeHtml(a.Nama)}</div>
           ${alamat ? `<div class="text-xs text-slate-400">${escapeHtml(alamat)}</div>` : ''}
         </td>
-        <td class="p-3">${escapeHtml(formatWaktuIndo(a.Waktu))}</td>
+        <td class="p-3">${escapeHtml(formatWaktuNumerik(a.Waktu))}</td>
         <td class="p-3"><span class="px-2 py-1 rounded-full text-xs ${statusColor}">${escapeHtml(a.Status)}</span></td>
       </tr>`;
   });
