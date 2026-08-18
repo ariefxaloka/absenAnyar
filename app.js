@@ -2,7 +2,7 @@
 // KONFIGURASI - GANTI DENGAN URL WEB APP GOOGLE APPS SCRIPT KAMU
 // =========================================================
 const CONFIG = {
-  APP_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbwuyOS9xRTHe6am30msa1O-Bg6_uktKShiC1rArGa5ZapBNcQNopZZYIQRkI0j6T9BMKA/exec'
+  APP_SCRIPT_URL: 'PASTE_URL_WEB_APP_APPS_SCRIPT_DI_SINI'
 };
 
 const BLOK_OPTIONS = { JOLIN: ['F', 'G'], PIRES: ['A', 'B', 'C', 'D', 'E'] };
@@ -10,14 +10,12 @@ const HARI_ID = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']
 const BULAN_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
 // ---------------------- Format tanggal Indonesia ----------------------
-// Input tanggal murni (yyyy-MM-dd) -> "Senin, 8 Agustus 2026"
 function formatTanggalIndo(tanggalStr) {
   if (!tanggalStr) return '';
   const d = new Date(tanggalStr + 'T00:00:00');
   if (isNaN(d.getTime())) return tanggalStr;
   return `${HARI_ID[d.getDay()]}, ${d.getDate()} ${BULAN_ID[d.getMonth()]} ${d.getFullYear()}`;
 }
-// Input datetime (yyyy-MM-dd HH:mm[:ss]) -> "Senin, 8 Agustus 2026 10:15"
 function formatWaktuIndo(datetimeStr) {
   if (!datetimeStr) return '';
   const parts = String(datetimeStr).split(' ');
@@ -26,6 +24,12 @@ function formatWaktuIndo(datetimeStr) {
   return jam ? `${tanggal} ${jam}` : tanggal;
 }
 
+// ---------------------- Ikon inline (SVG) ----------------------
+const ICON_DOWNLOAD = `<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"/></svg>`;
+const ICON_EDIT = `<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536M9 11l6.586-6.586a2 2 0 112.828 2.828L11.828 13.828H9V11z"/><path stroke-linecap="round" stroke-linejoin="round" d="M5 19h14"/></svg>`;
+const ICON_TRASH = `<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 7h12M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3m2 0v13a2 2 0 01-2 2H8a2 2 0 01-2-2V7h12z"/></svg>`;
+const ICON_EXCEL = `<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 inline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 3h7l5 5v13a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 13l6 6M15 13l-6 6"/></svg>`;
+
 // ---------------------- AUTH (PIN admin) ----------------------
 const AUTH_KEY = 'rt_absensi_pin';
 function getPin() { return localStorage.getItem(AUTH_KEY) || ''; }
@@ -33,8 +37,6 @@ function setPin(pin) { localStorage.setItem(AUTH_KEY, pin); }
 function clearPin() { localStorage.removeItem(AUTH_KEY); }
 
 // ---------------------- Helper fetch ----------------------
-// Semua request (baca & tulis) memakai GET dengan query string, BUKAN POST,
-// karena redirect 302 Apps Script membuang body request POST di fetch().
 async function apiCall(action, params) {
   const url = new URL(CONFIG.APP_SCRIPT_URL);
   url.searchParams.set('action', action);
@@ -52,13 +54,29 @@ async function apiCall(action, params) {
 const apiGet = apiCall;
 const apiPost = apiCall;
 
-// ---------------------- Toast ----------------------
+// ---------------------- Toast & Popup Peringatan ----------------------
 function toast(msg, type = 'success') {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.className = 'toast show ' + (type === 'error' ? 'toast-error' : 'toast-success');
   clearTimeout(el._t);
   el._t = setTimeout(() => { el.className = 'toast'; }, 3000);
+}
+
+function showWarningPopup(message) {
+  document.getElementById('warning-modal-text').textContent = message;
+  document.getElementById('warning-modal').classList.remove('hidden');
+}
+document.getElementById('warning-modal-close').addEventListener('click', () => {
+  document.getElementById('warning-modal').classList.add('hidden');
+});
+
+function handleFormError(err) {
+  if (err.message.startsWith('DUPLIKAT:')) {
+    showWarningPopup(err.message.replace('DUPLIKAT:', '').trim());
+  } else {
+    toast('Gagal: ' + err.message, 'error');
+  }
 }
 
 // ---------------------- Login screen ----------------------
@@ -84,6 +102,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
 document.getElementById('logout-btn').addEventListener('click', () => {
   clearPin();
   stopAutoSync();
+  folderUnlocked = false;
   document.getElementById('app-root').classList.add('hidden');
   document.getElementById('login-overlay').classList.remove('hidden');
   document.getElementById('login-pin').value = '';
@@ -105,6 +124,8 @@ async function tryAutoLogin() {
 // ---------------------- Tab navigation ----------------------
 const tabs = ['kegiatan', 'warga', 'scan', 'laporan', 'folder'];
 let activeTab = 'kegiatan';
+let folderUnlocked = false;
+
 function showTab(name) {
   activeTab = name;
   tabs.forEach(t => {
@@ -115,9 +136,31 @@ function showTab(name) {
   if (name === 'warga') { loadWargaList(); }
   if (name === 'scan') { loadKegiatanDropdown('scan-kegiatan'); resetScanSummary(); }
   if (name === 'laporan') { loadKegiatanDropdown('laporan-kegiatan'); }
-  if (name === 'folder') { loadFolderInfo(); }
+  if (name === 'folder') {
+    document.getElementById('folder-password-overlay').classList.toggle('hidden', folderUnlocked);
+    document.getElementById('folder-content').classList.toggle('hidden', !folderUnlocked);
+    if (folderUnlocked) loadFolderInfo();
+  }
 }
 tabs.forEach(t => document.getElementById('tab-' + t).addEventListener('click', () => showTab(t)));
+
+document.getElementById('folder-password-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pw = document.getElementById('folder-password-input').value;
+  const errEl = document.getElementById('folder-password-error');
+  errEl.classList.add('hidden');
+  try {
+    await apiPost('checkFolderPassword', { password: pw });
+    folderUnlocked = true;
+    document.getElementById('folder-password-input').value = '';
+    document.getElementById('folder-password-overlay').classList.add('hidden');
+    document.getElementById('folder-content').classList.remove('hidden');
+    loadFolderInfo();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.classList.remove('hidden');
+  }
+});
 
 // ---------------------- AUTO SYNC (tanpa refresh/logout) ----------------------
 let syncTimer = null;
@@ -132,7 +175,6 @@ function stopAutoSync() {
 async function autoSync() {
   if (!getPin()) return;
   try {
-    // Selalu segarkan dropdown "Pilih Warga" di menu Absensi, apapun tab aktif
     const freshWarga = await apiGet('getWarga');
     scanWargaCache = freshWarga;
     populateScanManualSelect();
@@ -151,7 +193,7 @@ async function autoSync() {
       const idK = document.getElementById('laporan-kegiatan').value;
       if (idK) loadLaporan();
     }
-  } catch (err) { /* diam-diam, jangan spam toast tiap 12 detik */ }
+  } catch (err) { /* diam-diam */ }
 }
 
 // ---------------------- Blok Rumah dependent dropdown ----------------------
@@ -169,7 +211,7 @@ let kegiatanEditId = null;
 function statusBadgeClass(status) {
   if (status === 'Aktif') return 'bg-emerald-100 text-emerald-700';
   if (status === 'Selesai') return 'bg-slate-200 text-slate-600';
-  return 'bg-amber-100 text-amber-700'; // Terjadwal
+  return 'bg-amber-100 text-amber-700';
 }
 
 async function loadKegiatanList() {
@@ -190,8 +232,8 @@ async function loadKegiatanList() {
         <td class="p-3">${escapeHtml(k.Lokasi)}</td>
         <td class="p-3"><span class="px-2 py-1 rounded-full text-xs ${statusBadgeClass(k.Status)}">${escapeHtml(k.Status)}</span></td>
         <td class="p-3 space-x-2 whitespace-nowrap">
-          <button class="text-amber-600 hover:underline text-sm" onclick="editKegiatan('${k.ID}')">Edit</button>
-          <button class="text-red-600 hover:underline text-sm" onclick="deleteKegiatan('${k.ID}','${escapeAttr(k.Nama)}')">Hapus</button>
+          <button title="Edit" class="text-amber-600 hover:text-amber-800" onclick="editKegiatan('${k.ID}')">${ICON_EDIT}</button>
+          <button title="Hapus" class="text-red-600 hover:text-red-800" onclick="deleteKegiatan('${k.ID}','${escapeAttr(k.Nama)}')">${ICON_TRASH}</button>
         </td>
       </tr>`).join('');
   } catch (err) {
@@ -203,11 +245,8 @@ document.getElementById('form-kegiatan').addEventListener('submit', async (e) =>
   e.preventDefault();
   const f = e.target;
   const payload = {
-    nama: f.nama.value.trim(),
-    tanggal: f.tanggal.value,
-    jamMulai: f.jamMulai.value,
-    jamSelesai: f.jamSelesai.value,
-    lokasi: f.lokasi.value.trim()
+    nama: f.nama.value.trim(), tanggal: f.tanggal.value,
+    jamMulai: f.jamMulai.value, jamSelesai: f.jamSelesai.value, lokasi: f.lokasi.value.trim()
   };
   try {
     if (kegiatanEditId) {
@@ -229,11 +268,8 @@ function editKegiatan(id) {
   if (!k) return;
   kegiatanEditId = id;
   const f = document.getElementById('form-kegiatan');
-  f.nama.value = k.Nama || '';
-  f.tanggal.value = k.Tanggal || '';
-  f.jamMulai.value = k.JamMulai || '';
-  f.jamSelesai.value = k.JamSelesai || '';
-  f.lokasi.value = k.Lokasi || '';
+  f.nama.value = k.Nama || ''; f.tanggal.value = k.Tanggal || '';
+  f.jamMulai.value = k.JamMulai || ''; f.jamSelesai.value = k.JamSelesai || ''; f.lokasi.value = k.Lokasi || '';
   document.getElementById('kegiatan-form-title').textContent = 'Edit Kegiatan: ' + k.Nama;
   document.getElementById('kegiatan-submit-btn').textContent = 'Update Kegiatan';
   document.getElementById('kegiatan-cancel-edit').classList.remove('hidden');
@@ -279,10 +315,7 @@ async function loadKegiatanDropdown(selectId) {
   try {
     const data = await apiGet('getKegiatan');
     kegiatanCache = data;
-    if (!data.length) {
-      select.innerHTML = '<option value="">Belum ada kegiatan</option>';
-      return;
-    }
+    if (!data.length) { select.innerHTML = '<option value="">Belum ada kegiatan</option>'; return; }
     const currentVal = select.value;
     select.innerHTML = '<option value="">-- Pilih kegiatan --</option>' +
       data.map(k => `<option value="${k.ID}">${escapeHtml(k.Nama)} — ${escapeHtml(formatTanggalIndo(k.Tanggal))} (${escapeHtml(k.Status)})</option>`).join('');
@@ -353,11 +386,10 @@ function renderWargaTable(data) {
       <td class="p-3 font-medium">${escapeHtml(w.Nama)}</td>
       <td class="p-3">${escapeHtml(w.NamaRumah)} ${escapeHtml(w.BlokRumah)}${w.NoRumah ? ', No. ' + escapeHtml(w.NoRumah) : ''}</td>
       <td class="p-3">${escapeHtml(w.NoHP)}</td>
-      <td class="p-3 space-x-2 whitespace-nowrap">
-        <button class="text-indigo-600 hover:underline text-sm" onclick="openQrModal('${w.ID}','${escapeAttr(w.Nama)}')">QR</button>
-        <button class="text-purple-600 hover:underline text-sm" onclick="saveQrToDrive('${w.ID}')">Simpan Drive</button>
-        <button class="text-amber-600 hover:underline text-sm" onclick="editWarga('${w.ID}')">Edit</button>
-        <button class="text-red-600 hover:underline text-sm" onclick="deleteWarga('${w.ID}','${escapeAttr(w.Nama)}')">Hapus</button>
+      <td class="p-3 space-x-3 whitespace-nowrap">
+        <button title="Unduh QR (Google Drive)" class="text-indigo-600 hover:text-indigo-800" onclick="handleDownloadQr('${w.ID}')">${ICON_DOWNLOAD}</button>
+        <button title="Edit" class="text-amber-600 hover:text-amber-800" onclick="editWarga('${w.ID}')">${ICON_EDIT}</button>
+        <button title="Hapus" class="text-red-600 hover:text-red-800" onclick="deleteWarga('${w.ID}','${escapeAttr(w.Nama)}')">${ICON_TRASH}</button>
       </td>
     </tr>`).join('');
 
@@ -439,67 +471,109 @@ document.getElementById('form-warga').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
   const payload = {
-    nama: f.nama.value.trim(),
-    namaRumah: f.namaRumah.value,
-    blokRumah: f.blokRumah.value,
-    noRumah: f.noRumah.value.trim(),
-    nohp: f.nohp.value.trim()
+    nama: f.nama.value.trim(), namaRumah: f.namaRumah.value, blokRumah: f.blokRumah.value,
+    noRumah: f.noRumah.value.trim(), nohp: f.nohp.value.trim()
   };
   try {
+    let res;
     if (wargaEditId) {
-      await apiPost('updateWarga', Object.assign({ id: wargaEditId }, payload));
-      toast('Data warga berhasil diperbarui');
+      res = await apiPost('updateWarga', Object.assign({ id: wargaEditId }, payload));
+      toast(res.qrSaved ? 'Data & QR berhasil diperbarui (tersimpan ke Drive)' : 'Data warga berhasil diperbarui');
     } else {
-      await apiPost('addWarga', payload);
-      toast('Warga berhasil ditambahkan');
+      res = await apiPost('addWarga', payload);
+      toast(res.qrSaved ? 'Warga ditambahkan & QR otomatis tersimpan ke Drive' : 'Warga berhasil ditambahkan (folder Drive belum diatur, QR belum tersimpan)');
     }
     resetWargaForm();
+    loadWargaList();
+  } catch (err) {
+    handleFormError(err);
+  }
+});
+
+// ---------------------- Download QR (dari Google Drive) ----------------------
+async function handleDownloadQr(id) {
+  const w = wargaCache.find(x => x.ID === id);
+  if (w && w.QrUrl) { window.open(w.QrUrl, '_blank'); return; }
+  toast('Membuat QR...');
+  try {
+    const res = await apiPost('generateQrPdf', { id_warga: id });
+    if (w) w.QrUrl = res.fileUrl;
+    window.open(res.fileUrl, '_blank');
+  } catch (err) {
+    toast('Gagal membuat QR: ' + err.message, 'error');
+  }
+}
+
+document.getElementById('warga-save-all-drive').addEventListener('click', async () => {
+  if (!wargaCache.length) { toast('Belum ada data warga', 'error'); return; }
+  if (!confirm(`Buat ulang / simpan QR untuk ${wargaCache.length} warga ke Google Drive? Proses ini bisa memakan waktu beberapa menit.`)) return;
+  toast('Memproses, mohon tunggu...');
+  try {
+    const res = await apiPost('generateAllQrPdf', {});
+    toast(`Selesai: ${res.sukses} berhasil, ${res.gagal} gagal`, res.gagal ? 'error' : 'success');
     loadWargaList();
   } catch (err) {
     toast('Gagal: ' + err.message, 'error');
   }
 });
 
-// ---------------------- QR Modal (generate + download PNG) ----------------------
-function openQrModal(id, nama) {
-  document.getElementById('qr-modal').classList.remove('hidden');
-  document.getElementById('qr-modal-nama').textContent = nama;
-  const canvas = document.getElementById('qr-canvas');
-  QRCode.toCanvas(canvas, id, { width: 240, margin: 2 }, (err) => {
-    if (err) toast('Gagal membuat QR: ' + err.message, 'error');
+// ---------------------- Import CSV ----------------------
+document.getElementById('import-csv-btn').addEventListener('click', async () => {
+  const input = document.getElementById('import-csv-input');
+  const statusEl = document.getElementById('import-csv-status');
+  if (!input.files.length) { toast('Pilih file CSV dulu', 'error'); return; }
+
+  statusEl.textContent = 'Membaca file...';
+  Papa.parse(input.files[0], {
+    header: true,
+    skipEmptyLines: true,
+    complete: async (results) => {
+      const records = results.data.map(row => {
+        const norm = {};
+        Object.keys(row).forEach(k => { norm[k.trim().toLowerCase()] = row[k]; });
+        return {
+          nama: (norm.nama || '').trim(),
+          namaRumah: (norm.namarumah || '').trim(),
+          blokRumah: (norm.blok || norm.blokrumah || '').trim(),
+          noRumah: (norm.norumah || '').trim()
+        };
+      }).filter(r => r.nama);
+
+      if (!records.length) { toast('File CSV kosong atau format kolom tidak sesuai', 'error'); return; }
+
+      statusEl.textContent = `Mengimpor ${records.length} data, mohon tunggu...`;
+      try {
+        const res = await apiPost('importWarga', { data: JSON.stringify(records) });
+        statusEl.textContent = `Selesai: ${res.imported} berhasil, ${res.skipped} dilewati (duplikat), ${res.gagal} gagal.`;
+        toast(`Import selesai: ${res.imported} berhasil ditambahkan`);
+        if (res.skipped > 0) {
+          showWarningPopup(`${res.skipped} data dilewati karena alamat (Nama Rumah - Blok - No. Rumah) sudah terdaftar sebelumnya.`);
+        }
+        input.value = '';
+        loadWargaList();
+      } catch (err) {
+        statusEl.textContent = '';
+        toast('Gagal import: ' + err.message, 'error');
+      }
+    },
+    error: (err) => {
+      statusEl.textContent = '';
+      toast('Gagal membaca CSV: ' + err.message, 'error');
+    }
   });
-  document.getElementById('qr-download').onclick = () => {
-    const link = document.createElement('a');
-    link.download = 'QR-' + nama.replace(/\s+/g, '_') + '.png';
-    link.href = canvas.toDataURL('image/png');
-    link.click();
-  };
-}
-document.getElementById('qr-modal-close').addEventListener('click', () => {
-  document.getElementById('qr-modal').classList.add('hidden');
 });
 
-// ---------------------- Simpan QR ke Google Drive ----------------------
-async function saveQrToDrive(idWarga) {
-  toast('Menyimpan QR ke Drive...');
-  try {
-    const res = await apiPost('generateQrPdf', { id_warga: idWarga });
-    toast('QR tersimpan: ' + res.fileName);
-  } catch (err) {
-    toast('Gagal simpan ke Drive: ' + err.message, 'error');
-  }
-}
-
-document.getElementById('warga-save-all-drive').addEventListener('click', async () => {
+// ---------------------- Export Excel ----------------------
+document.getElementById('warga-export-excel').addEventListener('click', () => {
   if (!wargaCache.length) { toast('Belum ada data warga', 'error'); return; }
-  if (!confirm(`Simpan QR untuk ${wargaCache.length} warga ke Google Drive? Proses ini bisa memakan waktu beberapa menit.`)) return;
-  toast('Memproses, mohon tunggu...');
-  try {
-    const res = await apiPost('generateAllQrPdf', {});
-    toast(`Selesai: ${res.sukses} berhasil, ${res.gagal} gagal`, res.gagal ? 'error' : 'success');
-  } catch (err) {
-    toast('Gagal: ' + err.message, 'error');
-  }
+  const rows = wargaCache.map(w => ({
+    Nama: w.Nama, 'Nama Rumah': w.NamaRumah, Blok: w.BlokRumah, 'No. Rumah': w.NoRumah,
+    'No. HP': w.NoHP, 'Tanggal Daftar': w.TanggalDaftar
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Data Warga');
+  XLSX.writeFile(wb, 'data-warga.xlsx');
 });
 
 // ---------------------- FOLDER QR ----------------------
@@ -622,7 +696,6 @@ async function handleScanResult(idKegiatan, idWarga, status) {
   }
 }
 
-// Log Terbaru: maksimal 5 entri terakhir
 function addScanLog(nama, waktu, status, duplikat) {
   const list = document.getElementById('scan-log');
   const li = document.createElement('li');
@@ -702,7 +775,6 @@ function renderLaporanTable() {
       </tr>`;
   });
 
-  // Kalau kegiatan sudah Selesai, tampilkan juga warga yang Tidak Hadir
   if (laporanKegiatanSelected && laporanKegiatanSelected.Status === 'Selesai' && laporanTidakHadirList.length) {
     laporanTidakHadirList.forEach(w => {
       const alamat = `${w.NamaRumah || ''} ${w.BlokRumah || ''}${w.NoRumah ? ', No. ' + w.NoRumah : ''}`.trim();
