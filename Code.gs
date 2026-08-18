@@ -1,38 +1,31 @@
 /**
  * =========================================================
- *  ABSENSI RT - Backend (Google Apps Script + Google Sheets)
+ *  ABSENSI RT - Backend (Google Apps Script + Google Sheets + Drive)
  * =========================================================
  *
  * Sheet yang dipakai (dibuat OTOMATIS saat pertama kali dipanggil):
  *  - Warga    : ID | Nama | NamaRumah | BlokRumah | NoRumah | NoHP | TanggalDaftar
- *  - Kegiatan : ID | Nama | Tanggal | Lokasi | Status
- *  - Absensi  : ID | ID_Kegiatan | ID_Warga | Nama | Waktu | Status   (Status: Hadir / Ijin)
+ *  - Kegiatan : ID | Nama | Tanggal | JamMulai | JamSelesai | Lokasi
+ *               (Status dihitung otomatis dari Tanggal+Jam, TIDAK disimpan statis)
+ *  - Absensi  : ID | ID_Kegiatan | ID_Warga | Nama | Waktu | Status   (Hadir / Ijin)
  *
  * CARA DEPLOY:
- *  1. Buka Google Sheets yang ingin dipakai sebagai database (boleh kosong).
- *  2. Extensions > Apps Script (WAJIB dari dalam Sheet ini, bukan project
- *     berdiri sendiri dari script.google.com langsung).
+ *  1. Buka Google Sheets yang ingin dipakai sebagai database.
+ *  2. Extensions > Apps Script (WAJIB dari dalam Sheet ini).
  *  3. Hapus isi default, tempel SELURUH isi file ini.
- *  4. Deploy > New deployment > Type: Web app.
- *       - Execute as     : Me
- *       - Who has access : Anyone
- *  5. Deploy, authorize akses. Salin "Web app URL", tempel ke
- *     CONFIG.APP_SCRIPT_URL di webapp/app.js.
- *  6. Setiap kali kode ini diubah, WAJIB Deploy > Manage deployments >
- *     Edit (pensil) > New version, supaya URL yang sama pakai kode terbaru.
+ *  4. Deploy > New deployment > Type: Web app. Execute as: Me. Access: Anyone.
+ *  5. Authorize akses (kali ini akan minta izin TAMBAHAN untuk Google Drive
+ *     & Google Docs karena ada fitur simpan QR/Laporan PDF - ini normal).
+ *  6. Salin Web App URL ke CONFIG.APP_SCRIPT_URL di webapp/app.js.
+ *  7. Setiap ubah kode: Deploy > Manage deployments > Edit > New version.
  *
- * MIGRASI DARI VERSI LAMA (kolom RT/RW/Alamat):
- *  Kalau sheet Warga kamu masih pakai kolom lama (RT, RW, Alamat), jalankan
- *  fungsi migrateWargaSheet() SEKALI secara manual di editor (pilih dari
- *  dropdown lalu klik Run ▶️). Ini akan mengganti nama kolom RT->NamaRumah,
- *  RW->BlokRumah, Alamat->NoRumah tanpa menghapus data yang sudah ada.
- *  Data lama di kolom tsb (misal RT berisi "01") TIDAK otomatis dikonversi
- *  ke JOLIN/PIRES - silakan sesuaikan manual di sheet setelah migrasi.
+ * MIGRASI DARI VERSI LAMA:
+ *  - migrateWargaSheet()    -> ganti RT/RW/Alamat jadi NamaRumah/BlokRumah/NoRumah
+ *  - migrateKegiatanSheet() -> tambah kolom JamMulai/JamSelesai
+ *  Jalankan manual sekali (pilih fungsi di dropdown editor, klik Run ▶️).
  *
- * CATATAN METODE HTTP:
- *  Semua aksi (baca & tulis) diakses lewat GET (query string), BUKAN POST,
- *  karena redirect 302 pada Web App Apps Script membuang body request POST
- *  di browser modern (method otomatis jadi GET tanpa data).
+ * CATATAN METODE HTTP: semua aksi (baca & tulis) lewat GET (query string),
+ * bukan POST, karena redirect 302 Web App Apps Script membuang body POST.
  * =========================================================
  */
 
@@ -41,6 +34,15 @@ const SHEET_KEGIATAN = 'Kegiatan';
 const SHEET_ABSENSI = 'Absensi';
 
 const BLOK_OPTIONS = { JOLIN: ['F', 'G'], PIRES: ['A', 'B', 'C', 'D', 'E'] };
+const HARI_ID = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+const BULAN_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+function formatTanggalIndonesia(tanggalStr) {
+  if (!tanggalStr) return '';
+  const d = new Date(tanggalStr);
+  if (isNaN(d.getTime())) return String(tanggalStr);
+  return HARI_ID[d.getDay()] + ', ' + d.getDate() + ' ' + BULAN_ID[d.getMonth()] + ' ' + d.getFullYear();
+}
 
 // ---------------------- Spreadsheet helpers ----------------------
 function getSS() {
@@ -49,9 +51,8 @@ function getSS() {
   const id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
   if (id) return SpreadsheetApp.openById(id);
   throw new Error(
-    'Tidak menemukan Spreadsheet aktif. Pastikan script ini dibuat lewat menu ' +
-    'Extensions > Apps Script DI DALAM Google Sheets, atau isi Script ' +
-    'Properties "SPREADSHEET_ID" dengan ID spreadsheet tujuan.'
+    'Tidak menemukan Spreadsheet aktif. Pastikan script dibuat lewat Extensions > ' +
+    'Apps Script DI DALAM Google Sheets, atau isi Script Properties "SPREADSHEET_ID".'
   );
 }
 
@@ -71,13 +72,12 @@ function sheetWarga() {
   return getOrCreateSheet(SHEET_WARGA, ['ID', 'Nama', 'NamaRumah', 'BlokRumah', 'NoRumah', 'NoHP', 'TanggalDaftar']);
 }
 function sheetKegiatan() {
-  return getOrCreateSheet(SHEET_KEGIATAN, ['ID', 'Nama', 'Tanggal', 'Lokasi', 'Status']);
+  return getOrCreateSheet(SHEET_KEGIATAN, ['ID', 'Nama', 'Tanggal', 'JamMulai', 'JamSelesai', 'Lokasi']);
 }
 function sheetAbsensi() {
   return getOrCreateSheet(SHEET_ABSENSI, ['ID', 'ID_Kegiatan', 'ID_Warga', 'Nama', 'Waktu', 'Status']);
 }
 
-// Jalankan SEKALI manual (Run ▶️) untuk memastikan 3 sheet dasar dibuat.
 function setupSheets() {
   sheetWarga();
   sheetKegiatan();
@@ -85,12 +85,10 @@ function setupSheets() {
   Logger.log('Sheet Warga, Kegiatan, Absensi berhasil dibuat/dipastikan ada.');
 }
 
-// Jalankan SEKALI manual kalau upgrade dari versi lama (kolom RT/RW/Alamat).
 function migrateWargaSheet() {
   const ss = getSS();
   const sheet = ss.getSheetByName(SHEET_WARGA);
   if (!sheet) { Logger.log('Sheet Warga belum ada. Jalankan setupSheets() dulu.'); return; }
-
   const lastCol = sheet.getLastColumn();
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   const renameMap = { RT: 'NamaRumah', RW: 'BlokRumah', Alamat: 'NoRumah' };
@@ -99,19 +97,27 @@ function migrateWargaSheet() {
     if (renameMap[h]) { changed = true; return renameMap[h]; }
     return h;
   });
-  if (changed) {
-    sheet.getRange(1, 1, 1, lastCol).setValues([newHeaders]);
-    Logger.log('Header diperbarui: ' + newHeaders.join(', '));
-  } else {
-    Logger.log('Header sudah sesuai format baru.');
-  }
-
+  if (changed) sheet.getRange(1, 1, 1, lastCol).setValues([newHeaders]);
   const headers2 = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   if (headers2.indexOf('NoRumah') === -1) {
     sheet.getRange(1, headers2.length + 1).setValue('NoRumah');
-    Logger.log('Kolom NoRumah ditambahkan di akhir.');
   }
-  Logger.log('SELESAI. Cek ulang isi kolom NamaRumah/BlokRumah - data lama mungkin perlu disesuaikan manual ke JOLIN/PIRES dan A-G.');
+  Logger.log('Migrasi Warga selesai. Header saat ini: ' + sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].join(', '));
+}
+
+function migrateKegiatanSheet() {
+  const ss = getSS();
+  const sheet = ss.getSheetByName(SHEET_KEGIATAN);
+  if (!sheet) { Logger.log('Sheet Kegiatan belum ada. Jalankan setupSheets() dulu.'); return; }
+  let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  if (headers.indexOf('JamMulai') === -1) {
+    sheet.getRange(1, headers.length + 1).setValue('JamMulai');
+    headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  }
+  if (headers.indexOf('JamSelesai') === -1) {
+    sheet.getRange(1, headers.length + 1).setValue('JamSelesai');
+  }
+  Logger.log('Migrasi Kegiatan selesai. Header saat ini: ' + sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].join(', '));
 }
 
 // ---------------------- Generic row helpers ----------------------
@@ -139,7 +145,7 @@ function appendRowByHeaders(sheet, dataObj) {
 function findRowIndexById(sheet, id) {
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
-    if (String(data[i][0]) === String(id)) return i + 1; // ID selalu kolom A
+    if (String(data[i][0]) === String(id)) return i + 1;
   }
   return -1;
 }
@@ -165,6 +171,11 @@ function deleteRowById(sheet, id) {
   return true;
 }
 
+function clearAllDataRows(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
+}
+
 function generateId(prefix) {
   const rand = Math.floor(Math.random() * 900 + 100);
   const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyMMddHHmmss');
@@ -181,8 +192,25 @@ function validateBlok(namaRumah, blokRumah) {
 }
 
 function json(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+// ---------------------- Status Kegiatan (dinamis dari jam) ----------------------
+function computeKegiatanStatus(tanggal, jamMulai, jamSelesai) {
+  try {
+    if (!tanggal) return 'Aktif';
+    const startStr = (tanggal + ' ' + (jamMulai || '00:00') + ':00').replace(/-/g, '/');
+    const endStr = (tanggal + ' ' + (jamSelesai || '23:59') + ':59').replace(/-/g, '/');
+    const start = new Date(startStr);
+    const end = new Date(endStr);
+    const now = new Date();
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return 'Aktif';
+    if (now < start) return 'Terjadwal';
+    if (now > end) return 'Selesai';
+    return 'Aktif';
+  } catch (e) {
+    return 'Aktif';
+  }
 }
 
 // ---------------------- LOGIN ADMIN (PIN) ----------------------
@@ -201,18 +229,100 @@ function sendWhatsAppNotif(pesan) {
   if (!token || !target) return;
   try {
     UrlFetchApp.fetch('https://api.fonnte.com/send', {
-      method: 'post',
-      headers: { Authorization: token },
-      payload: { target: target, message: pesan },
-      muteHttpExceptions: true
+      method: 'post', headers: { Authorization: token },
+      payload: { target: target, message: pesan }, muteHttpExceptions: true
     });
-  } catch (e) { /* jangan sampai gagal kirim WA menggagalkan absensi */ }
+  } catch (e) { /* jangan sampai gagal WA menggagalkan absensi */ }
+}
+
+// ---------------------- FOLDER QR (Google Drive) ----------------------
+function getDriveFolderId() {
+  return PropertiesService.getScriptProperties().getProperty('DRIVE_FOLDER_ID') || '';
+}
+
+function qrPdfFileName(warga) {
+  return 'QR_' + (warga.NamaRumah || '-') + '_' + (warga.BlokRumah || '-') + '_' + (warga.NoRumah || '-') + '.pdf';
+}
+
+// Buat QR + PDF (label Nama Rumah/Blok/No Rumah di atas QR) lalu simpan ke folder.
+// Kalau file dengan nama sama sudah ada, file lama dibuang dulu (rewrite, bukan duplikat).
+function generateWargaQrPdf(warga) {
+  const folderId = getDriveFolderId();
+  if (!folderId) throw new Error('Folder Google Drive belum diatur. Buka menu "Folder QR" untuk mengaturnya.');
+  const folder = DriveApp.getFolderById(folderId);
+
+  const qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=' + encodeURIComponent(warga.ID);
+  const qrResponse = UrlFetchApp.fetch(qrUrl, { muteHttpExceptions: true });
+  if (qrResponse.getResponseCode() !== 200) throw new Error('Gagal membuat gambar QR untuk ' + warga.Nama);
+  const qrBlob = qrResponse.getBlob().setName('qr.png');
+
+  const label = (warga.NamaRumah || '-') + ' ' + (warga.BlokRumah || '-') + (warga.NoRumah ? ' No. ' + warga.NoRumah : '');
+  const fileName = qrPdfFileName(warga);
+
+  const doc = DocumentApp.create('TEMP_' + fileName);
+  const body = doc.getBody();
+  body.clear();
+  const labelPara = body.appendParagraph(label);
+  labelPara.setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  labelPara.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+  const img = body.appendImage(qrBlob);
+  img.setWidth(250);
+  img.setHeight(250);
+  body.appendParagraph(warga.Nama || '').setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+  doc.saveAndClose();
+
+  const pdfBlob = DriveApp.getFileById(doc.getId()).getAs(MimeType.PDF).setName(fileName);
+
+  const existing = folder.getFilesByName(fileName);
+  while (existing.hasNext()) { existing.next().setTrashed(true); }
+
+  const savedFile = folder.createFile(pdfBlob);
+  DriveApp.getFileById(doc.getId()).setTrashed(true);
+
+  return { fileId: savedFile.getId(), fileUrl: savedFile.getUrl(), fileName: fileName };
+}
+
+function deleteWargaQrFile(warga) {
+  const folderId = getDriveFolderId();
+  if (!folderId || !warga) return;
+  try {
+    const folder = DriveApp.getFolderById(folderId);
+    const files = folder.getFilesByName(qrPdfFileName(warga));
+    while (files.hasNext()) { files.next().setTrashed(true); }
+  } catch (e) { /* jangan sampai gagal hapus file mengganggu hapus data warga */ }
+}
+
+// ---------------------- LAPORAN PDF (tidak disimpan permanen, langsung diunduh) ----------------------
+function buildLaporanPdf(kegiatanNama, tanggalFormatted, rows) {
+  const doc = DocumentApp.create('TEMP_LAPORAN_' + new Date().getTime());
+  const body = doc.getBody();
+  body.clear();
+  body.appendParagraph('Laporan Absensi - ' + kegiatanNama).setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  const tglPara = body.appendParagraph(tanggalFormatted);
+  tglPara.editAsText().setItalic(true);
+  body.appendParagraph(' ');
+
+  const tableData = [['No', 'Nama', 'Alamat', 'Waktu', 'Status']];
+  rows.forEach(function (r, i) { tableData.push([String(i + 1), r.nama, r.alamat, r.waktu, r.status]); });
+  const table = body.appendTable(tableData);
+  const headerRow = table.getRow(0);
+  for (let c = 0; c < headerRow.getNumCells(); c++) headerRow.getCell(c).editAsText().setBold(true);
+
+  doc.saveAndClose();
+  const pdfBlob = DriveApp.getFileById(doc.getId()).getAs(MimeType.PDF);
+  DriveApp.getFileById(doc.getId()).setTrashed(true);
+  return pdfBlob;
+}
+
+// ---------------------- Cascade delete ----------------------
+function cascadeDeleteAbsensiByKegiatan(idKegiatan) {
+  const sheet = sheetAbsensi();
+  const ids = sheetToObjects(sheet).filter(function (a) { return a.ID_Kegiatan === idKegiatan; }).map(function (a) { return a.ID; });
+  ids.forEach(function (id) { deleteRowById(sheet, id); });
 }
 
 // ---------------------- ROUTER ----------------------
-function doGet(e) {
-  return handleRequest(e.parameter);
-}
+function doGet(e) { return handleRequest(e.parameter); }
 
 function doPost(e) {
   const params = {};
@@ -231,15 +341,11 @@ function handleRequest(params) {
     const action = params.action;
 
     if (action === 'ping') return json({ ok: true, data: 'pong' });
-
     if (action === 'login') {
       if (!checkPin(params.pin)) throw new Error('PIN salah');
       return json({ ok: true, data: { login: true } });
     }
-
-    if (!checkPin(params.pin)) {
-      return json({ ok: false, error: 'PIN salah atau sesi tidak valid' });
-    }
+    if (!checkPin(params.pin)) return json({ ok: false, error: 'PIN salah atau sesi tidak valid' });
 
     let result;
 
@@ -249,12 +355,6 @@ function handleRequest(params) {
         result = sheetToObjects(sheetWarga());
         break;
 
-      case 'getWargaById': {
-        const data = sheetToObjects(sheetWarga());
-        result = data.find(function (w) { return w.ID === params.id; }) || null;
-        break;
-      }
-
       case 'addWarga': {
         const sheet = sheetWarga();
         const namaRumah = params.namaRumah || '';
@@ -262,12 +362,8 @@ function handleRequest(params) {
         validateBlok(namaRumah, blokRumah);
         const id = generateId('WRG');
         appendRowByHeaders(sheet, {
-          ID: id,
-          Nama: params.nama || '',
-          NamaRumah: namaRumah,
-          BlokRumah: blokRumah,
-          NoRumah: params.noRumah || '',
-          NoHP: params.nohp || '',
+          ID: id, Nama: params.nama || '', NamaRumah: namaRumah, BlokRumah: blokRumah,
+          NoRumah: params.noRumah || '', NoHP: params.nohp || '',
           TanggalDaftar: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')
         });
         result = { id: id };
@@ -275,25 +371,24 @@ function handleRequest(params) {
       }
 
       case 'updateWarga': {
-        const sheet = sheetWarga();
         const namaRumah = params.namaRumah || '';
         const blokRumah = params.blokRumah || '';
         validateBlok(namaRumah, blokRumah);
         if (!params.id) throw new Error('id wajib diisi');
-        updateRowById(sheet, params.id, {
-          Nama: params.nama || '',
-          NamaRumah: namaRumah,
-          BlokRumah: blokRumah,
-          NoRumah: params.noRumah || '',
-          NoHP: params.nohp || ''
+        updateRowById(sheetWarga(), params.id, {
+          Nama: params.nama || '', NamaRumah: namaRumah, BlokRumah: blokRumah,
+          NoRumah: params.noRumah || '', NoHP: params.nohp || ''
         });
         result = { id: params.id };
         break;
       }
 
       case 'deleteWarga': {
-        const ok = deleteRowById(sheetWarga(), params.id);
+        const sheet = sheetWarga();
+        const warga = sheetToObjects(sheet).find(function (w) { return w.ID === params.id; });
+        const ok = deleteRowById(sheet, params.id);
         if (!ok) throw new Error('Warga tidak ditemukan');
+        if (warga) deleteWargaQrFile(warga);
         result = { deleted: true };
         break;
       }
@@ -301,25 +396,103 @@ function handleRequest(params) {
       case 'deleteWargaMultiple': {
         const ids = String(params.ids || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
         const sheet = sheetWarga();
+        const allWarga = sheetToObjects(sheet);
         let count = 0;
-        ids.forEach(function (id) { if (deleteRowById(sheet, id)) count++; });
+        ids.forEach(function (id) {
+          const warga = allWarga.find(function (w) { return w.ID === id; });
+          if (deleteRowById(sheet, id)) {
+            count++;
+            if (warga) deleteWargaQrFile(warga);
+          }
+        });
         result = { deleted: count };
         break;
       }
 
-      // ---------------- KEGIATAN ----------------
-      case 'getKegiatan':
-        result = sheetToObjects(sheetKegiatan());
+      // ---------------- FOLDER QR ----------------
+      case 'setFolderId': {
+        const folderId = String(params.folderId || '').trim();
+        if (!folderId) throw new Error('ID Folder wajib diisi');
+        let folderName;
+        try { folderName = DriveApp.getFolderById(folderId).getName(); }
+        catch (e) { throw new Error('Folder tidak ditemukan / tidak bisa diakses. Cek ID dan pastikan akun ini punya akses.'); }
+        PropertiesService.getScriptProperties().setProperty('DRIVE_FOLDER_ID', folderId);
+        result = { folderId: folderId, folderName: folderName };
         break;
+      }
+
+      case 'getFolderId': {
+        const folderId = getDriveFolderId();
+        let folderName = '';
+        if (folderId) {
+          try { folderName = DriveApp.getFolderById(folderId).getName(); }
+          catch (e) { folderName = '(folder tidak ditemukan)'; }
+        }
+        result = { folderId: folderId, folderName: folderName };
+        break;
+      }
+
+      case 'generateQrPdf': {
+        const warga = sheetToObjects(sheetWarga()).find(function (w) { return w.ID === params.id_warga; });
+        if (!warga) throw new Error('Warga tidak ditemukan');
+        result = generateWargaQrPdf(warga);
+        break;
+      }
+
+      case 'generateAllQrPdf': {
+        const allWarga = sheetToObjects(sheetWarga());
+        let sukses = 0, gagal = 0;
+        const errors = [];
+        allWarga.forEach(function (w) {
+          try { generateWargaQrPdf(w); sukses++; }
+          catch (e) { gagal++; errors.push(w.Nama + ': ' + e.message); }
+        });
+        result = { sukses: sukses, gagal: gagal, errors: errors };
+        break;
+      }
+
+      // ---------------- KEGIATAN ----------------
+      case 'getKegiatan': {
+        const data = sheetToObjects(sheetKegiatan());
+        result = data.map(function (k) {
+          k.Status = computeKegiatanStatus(k.Tanggal, k.JamMulai, k.JamSelesai);
+          return k;
+        });
+        break;
+      }
 
       case 'addKegiatan': {
-        const sheet = sheetKegiatan();
         const id = generateId('KEG');
-        appendRowByHeaders(sheet, {
+        appendRowByHeaders(sheetKegiatan(), {
           ID: id, Nama: params.nama || '', Tanggal: params.tanggal || '',
-          Lokasi: params.lokasi || '', Status: 'Aktif'
+          JamMulai: params.jamMulai || '', JamSelesai: params.jamSelesai || '', Lokasi: params.lokasi || ''
         });
         result = { id: id };
+        break;
+      }
+
+      case 'updateKegiatan': {
+        if (!params.id) throw new Error('id wajib diisi');
+        updateRowById(sheetKegiatan(), params.id, {
+          Nama: params.nama || '', Tanggal: params.tanggal || '',
+          JamMulai: params.jamMulai || '', JamSelesai: params.jamSelesai || '', Lokasi: params.lokasi || ''
+        });
+        result = { id: params.id };
+        break;
+      }
+
+      case 'deleteKegiatan': {
+        const ok = deleteRowById(sheetKegiatan(), params.id);
+        if (!ok) throw new Error('Kegiatan tidak ditemukan');
+        cascadeDeleteAbsensiByKegiatan(params.id);
+        result = { deleted: true };
+        break;
+      }
+
+      case 'deleteAllKegiatan': {
+        clearAllDataRows(sheetKegiatan());
+        clearAllDataRows(sheetAbsensi());
+        result = { deleted: true };
         break;
       }
 
@@ -355,9 +528,7 @@ function handleRequest(params) {
           result = { duplikat: false, updated: true, nama: warga.Nama, waktu: waktu, status: status };
         } else {
           const id = generateId('ABS');
-          appendRowByHeaders(absensiSheet, {
-            ID: id, ID_Kegiatan: idKegiatan, ID_Warga: idWarga, Nama: warga.Nama, Waktu: waktu, Status: status
-          });
+          appendRowByHeaders(absensiSheet, { ID: id, ID_Kegiatan: idKegiatan, ID_Warga: idWarga, Nama: warga.Nama, Waktu: waktu, Status: status });
           result = { duplikat: false, nama: warga.Nama, waktu: waktu, status: status };
         }
 
@@ -369,8 +540,6 @@ function handleRequest(params) {
         break;
       }
 
-      // Rekap Hadir / Ijin / Tidak Hadir untuk satu kegiatan, dihitung dari
-      // seluruh data Warga dibandingkan data Absensi kegiatan tsb.
       case 'getRekapKehadiran': {
         const idKegiatan = params.id_kegiatan;
         if (!idKegiatan) throw new Error('id_kegiatan wajib diisi');
@@ -388,12 +557,48 @@ function handleRequest(params) {
         });
 
         result = {
-          totalWarga: allWarga.length,
-          hadir: hadirList.length,
-          ijin: ijinList.length,
-          tidakHadir: tidakHadirList.length,
-          tidakHadirList: tidakHadirList
+          totalWarga: allWarga.length, hadir: hadirList.length, ijin: ijinList.length,
+          tidakHadir: tidakHadirList.length, tidakHadirList: tidakHadirList
         };
+        break;
+      }
+
+      case 'exportLaporanPdf': {
+        const idKegiatan = params.id_kegiatan;
+        if (!idKegiatan) throw new Error('id_kegiatan wajib diisi');
+        const kegiatan = sheetToObjects(sheetKegiatan()).find(function (k) { return k.ID === idKegiatan; });
+        if (!kegiatan) throw new Error('Kegiatan tidak ditemukan');
+
+        const allWarga = sheetToObjects(sheetWarga());
+        const wargaMap = {};
+        allWarga.forEach(function (w) { wargaMap[w.ID] = w; });
+
+        const absensiKegiatan = sheetToObjects(sheetAbsensi()).filter(function (a) { return a.ID_Kegiatan === idKegiatan; });
+        const rows = absensiKegiatan.map(function (a) {
+          const w = wargaMap[a.ID_Warga];
+          const alamat = w ? ((w.NamaRumah || '') + ' ' + (w.BlokRumah || '') + (w.NoRumah ? ', No. ' + w.NoRumah : '')) : '';
+          return { nama: a.Nama, alamat: alamat, waktu: a.Waktu, status: a.Status };
+        });
+
+        const status = computeKegiatanStatus(kegiatan.Tanggal, kegiatan.JamMulai, kegiatan.JamSelesai);
+        if (status === 'Selesai') {
+          const sudahTercatat = {};
+          absensiKegiatan.forEach(function (a) { sudahTercatat[a.ID_Warga] = true; });
+          allWarga.forEach(function (w) {
+            if (!sudahTercatat[w.ID]) {
+              const alamat = (w.NamaRumah || '') + ' ' + (w.BlokRumah || '') + (w.NoRumah ? ', No. ' + w.NoRumah : '');
+              rows.push({ nama: w.Nama, alamat: alamat, waktu: '-', status: 'Tidak Hadir' });
+            }
+          });
+        }
+
+        const tanggalFormatted = formatTanggalIndonesia(kegiatan.Tanggal);
+        const pdfBlob = buildLaporanPdf(kegiatan.Nama, tanggalFormatted, rows);
+        const base64 = Utilities.base64Encode(pdfBlob.getBytes());
+        const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss');
+        const fileName = (kegiatan.Nama || 'Kegiatan').replace(/[^a-zA-Z0-9]+/g, '_') + '_' + stamp + '.pdf';
+
+        result = { base64: base64, fileName: fileName };
         break;
       }
 
