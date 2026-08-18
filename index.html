@@ -8,7 +8,7 @@
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <style>
-  #tab-kegiatan, #tab-warga, #tab-scan, #tab-laporan {
+  #tab-kegiatan, #tab-warga, #tab-scan, #tab-laporan, #tab-folder {
     background-color: #ffffff; color: #475569; border: 1px solid #e2e8f0;
   }
   .tab-active {
@@ -60,6 +60,7 @@
     <button id="tab-warga" class="px-4 py-2 rounded-full text-sm whitespace-nowrap">Warga & QR</button>
     <button id="tab-scan" class="px-4 py-2 rounded-full text-sm whitespace-nowrap">Scan Absensi</button>
     <button id="tab-laporan" class="px-4 py-2 rounded-full text-sm whitespace-nowrap">Laporan</button>
+    <button id="tab-folder" class="px-4 py-2 rounded-full text-sm whitespace-nowrap">Folder QR</button>
   </nav>
 
   <main class="max-w-4xl mx-auto p-4 space-y-4">
@@ -67,22 +68,41 @@
     <!-- PANEL: KEGIATAN -->
     <section id="panel-kegiatan" class="space-y-4">
       <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
-        <h2 class="font-semibold mb-3">Tambah Kegiatan</h2>
+        <h2 id="kegiatan-form-title" class="font-semibold mb-3">Tambah Kegiatan</h2>
         <form id="form-kegiatan" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <input name="nama" required placeholder="Nama kegiatan (mis. Kerja Bakti)" class="border rounded-lg px-3 py-2 text-sm sm:col-span-2" />
           <input name="tanggal" type="date" required class="border rounded-lg px-3 py-2 text-sm" />
           <input name="lokasi" placeholder="Lokasi" class="border rounded-lg px-3 py-2 text-sm" />
-          <button class="sm:col-span-2 bg-indigo-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-indigo-700">Simpan Kegiatan</button>
+          <div>
+            <label class="text-xs text-slate-500">Jam Mulai</label>
+            <input name="jamMulai" type="time" required class="border rounded-lg px-3 py-2 text-sm w-full" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-500">Jam Selesai</label>
+            <input name="jamSelesai" type="time" required class="border rounded-lg px-3 py-2 text-sm w-full" />
+          </div>
+          <div class="sm:col-span-2 flex gap-2">
+            <button id="kegiatan-submit-btn" class="flex-1 bg-indigo-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-indigo-700">Simpan Kegiatan</button>
+            <button type="button" id="kegiatan-cancel-edit" class="hidden bg-slate-200 rounded-lg px-4 text-sm font-medium hover:bg-slate-300">Batal Edit</button>
+          </div>
         </form>
       </div>
 
-      <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead class="bg-slate-50 text-left text-slate-500">
-            <tr><th class="p-3">Nama</th><th class="p-3">Tanggal</th><th class="p-3">Lokasi</th><th class="p-3">Status</th></tr>
-          </thead>
-          <tbody id="kegiatan-tbody"></tbody>
-        </table>
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
+        <div class="flex justify-end mb-2">
+          <button id="kegiatan-delete-all" class="bg-red-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-red-700">Hapus Semua</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-left text-slate-500">
+              <tr>
+                <th class="p-3">No</th><th class="p-3">Nama</th><th class="p-3">Tanggal</th>
+                <th class="p-3">Jam</th><th class="p-3">Lokasi</th><th class="p-3">Status</th><th class="p-3">Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="kegiatan-tbody"></tbody>
+          </table>
+        </div>
       </div>
     </section>
 
@@ -92,17 +112,14 @@
         <h2 id="warga-form-title" class="font-semibold mb-3">Daftarkan Warga</h2>
         <form id="form-warga" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <input name="nama" required placeholder="Nama lengkap" class="border rounded-lg px-3 py-2 text-sm sm:col-span-2" />
-
           <select name="namaRumah" id="warga-namaRumah" required class="border rounded-lg px-3 py-2 text-sm">
             <option value="">-- Nama Rumah --</option>
             <option value="JOLIN">JOLIN</option>
             <option value="PIRES">PIRES</option>
           </select>
           <select name="blokRumah" id="warga-blokRumah" required class="border rounded-lg px-3 py-2 text-sm"></select>
-
           <input name="noRumah" placeholder="No. Rumah" class="border rounded-lg px-3 py-2 text-sm" />
           <input name="nohp" placeholder="No. HP" class="border rounded-lg px-3 py-2 text-sm" />
-
           <div class="sm:col-span-2 flex gap-2">
             <button id="warga-submit-btn" class="flex-1 bg-indigo-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-indigo-700">Simpan Warga</button>
             <button type="button" id="warga-cancel-edit" class="hidden bg-slate-200 rounded-lg px-4 text-sm font-medium hover:bg-slate-300">Batal Edit</button>
@@ -121,18 +138,18 @@
           <select id="filter-blok" class="border rounded-lg px-3 py-2 text-sm"></select>
         </div>
 
-        <button id="warga-bulk-delete" class="hidden mb-3 bg-red-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-red-700">Hapus Terpilih</button>
+        <div class="flex flex-wrap gap-2 mb-3">
+          <button id="warga-bulk-delete" class="hidden bg-red-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-red-700">Hapus Terpilih</button>
+          <button id="warga-save-all-drive" class="bg-purple-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-purple-700">Simpan Semua QR ke Drive</button>
+        </div>
 
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead class="bg-slate-50 text-left text-slate-500">
               <tr>
                 <th class="p-3 w-8"><input type="checkbox" id="warga-select-all" /></th>
-                <th class="p-3">No</th>
-                <th class="p-3">Nama</th>
-                <th class="p-3">Rumah</th>
-                <th class="p-3">No. HP</th>
-                <th class="p-3">Aksi</th>
+                <th class="p-3">No</th><th class="p-3">Nama</th><th class="p-3">Rumah</th>
+                <th class="p-3">No. HP</th><th class="p-3">Aksi</th>
               </tr>
             </thead>
             <tbody id="warga-tbody"></tbody>
@@ -188,7 +205,7 @@
       </div>
 
       <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
-        <h3 class="font-semibold mb-2 text-sm">Log Terbaru</h3>
+        <h3 class="font-semibold mb-2 text-sm">Log Terbaru (5 terakhir)</h3>
         <ul id="scan-log" class="space-y-1 text-sm"></ul>
       </div>
     </section>
@@ -198,7 +215,10 @@
       <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100 space-y-3">
         <div class="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
           <select id="laporan-kegiatan" class="border rounded-lg px-3 py-2 text-sm flex-1"></select>
-          <button id="laporan-export" class="bg-emerald-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-emerald-700 whitespace-nowrap">Export CSV</button>
+          <div class="flex gap-2">
+            <button id="laporan-export" class="bg-emerald-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-emerald-700 whitespace-nowrap">Export CSV</button>
+            <button id="laporan-export-pdf" class="bg-rose-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-rose-700 whitespace-nowrap">Export PDF</button>
+          </div>
         </div>
 
         <div id="laporan-summary" class="hidden grid grid-cols-3 gap-2 text-center">
@@ -225,6 +245,23 @@
             <tbody id="laporan-tbody"></tbody>
           </table>
         </div>
+      </div>
+    </section>
+
+    <!-- PANEL: FOLDER QR -->
+    <section id="panel-folder" class="hidden space-y-4">
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100 space-y-3">
+        <h2 class="font-semibold">Setup Folder Penyimpanan QR Code</h2>
+        <p class="text-sm text-slate-500">
+          QR Code tiap warga (dalam bentuk PDF berlabel Nama Rumah/Blok/No. Rumah) akan disimpan ke folder
+          Google Drive ini. Buka folder tujuan di Drive, salin ID-nya dari URL
+          (<code>drive.google.com/drive/folders/<strong>ID_INI</strong></code>), lalu tempel di bawah.
+        </p>
+        <form id="form-folder" class="flex flex-col sm:flex-row gap-2">
+          <input id="folder-id-input" placeholder="Masukkan ID folder Google Drive" required class="border rounded-lg px-3 py-2 text-sm flex-1" />
+          <button class="bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-indigo-700">Simpan</button>
+        </form>
+        <p id="folder-info" class="text-sm text-slate-600"></p>
       </div>
     </section>
 
