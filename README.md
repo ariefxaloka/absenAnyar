@@ -72,10 +72,17 @@ Kalau spreadsheet kamu sudah pernah dipakai dengan skema lama:
 ## Fitur Baru — Format Tanggal Indonesia
 Semua tanggal di aplikasi (tabel Kegiatan, log scan, laporan, dsb.) ditampilkan format **"Hari, Tanggal Bulan Tahun"**, contoh: `Senin, 8 Agustus 2026`. Untuk data yang menyertakan jam (log absensi), formatnya jadi `Senin, 8 Agustus 2026 10:15`.
 
-## Fitur Baru — Sinkronisasi Otomatis (tanpa refresh/logout)
-Aplikasi mengecek data terbaru setiap **12 detik** secara otomatis selama kamu login:
-- Dropdown **"Pilih Warga"** di menu Scan Absensi selalu ikut ter-update kalau ada warga baru/diubah/dihapus, walau kamu sedang di tab lain.
-- Tab yang sedang aktif (Kegiatan, Warga, Scan, Laporan) ikut menyegarkan datanya sendiri secara diam-diam, tanpa mengganggu form yang sedang kamu isi atau filter yang sedang kamu pakai.
+## Fitur Terbaru — Sinkronisasi Event-Driven (bukan polling)
+Sebelumnya aplikasi mengecek data baru tiap 12 detik lewat polling — ini sudah **dihapus**. Sekarang setiap kali ada perubahan data Warga (tambah/edit/hapus/import), aplikasi langsung menyegarkan:
+- Dropdown **"Pilih Warga"** di menu Scan Absensi — selalu ikut ter-update saat itu juga, apapun tab yang sedang kamu buka.
+- Ringkasan Hadir/Ijin/Tidak Hadir di tab Scan & Laporan (kalau kamu sedang membuka tab tsb dan sudah memilih kegiatan) — otomatis dihitung ulang karena jumlah warga berubah.
+
+Tidak ada lagi request berulang ke server saat idle — pembaruan hanya terjadi tepat saat ada aksi (simpan/edit/hapus/import), sehingga lebih hemat kuota Apps Script dan tetap real-time.
+
+## Fitur Terbaru — Perbaikan Format Tanggal & Jam
+- **Bug ISO string mentah** (mis. `2026-08-17T17:00:00.000Z` muncul di tabel Kegiatan) sudah diperbaiki di backend — Google Sheets kadang menyimpan input tanggal/jam sebagai objek Date internal, yang kalau tidak dikonversi akan bocor sebagai ISO string ke frontend. Sekarang semua nilai Date dari Sheets otomatis dikonversi ke string yang benar (memakai timezone script, bukan UTC) sebelum dikirim ke frontend.
+- Tabel Kegiatan: kolom **Jam** kini selalu tampil format `HH:MM` (mis. `10:00 - 12:00`).
+- Tabel Laporan: kolom **Waktu** kini format `DD/MM/YYYY-HH:MM:SS` (mis. `17/08/2026-10:15:32`) — beda dari tampilan tanggal Indonesia di tempat lain, khusus untuk tabel ini.
 
 ## Fitur Baru — Menu Kegiatan
 - Field baru **Jam Mulai** & **Jam Selesai** — status kegiatan dihitung otomatis dari kombinasi Tanggal + rentang jam ini:
